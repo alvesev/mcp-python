@@ -1,0 +1,6 @@
+mcp-python-container (0.5.0) zara; urgency=low
+
+  * The container image of 'mcp-python' as a self-extracting archive.
+  * Launchers for an end-user.
+
+ -- Alex Vesev <alex.vesev@gmail.com>  Sun, 15 Nov 2026 11:00:00 +0100

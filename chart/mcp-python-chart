@@ -1,0 +1,328 @@
+#!/usr/bin/env bash
+#
+#  Copyright 2026 Alex Vesev
+#
+#  This file is part of MCP Python - Model Context Protocol server to
+#  provide Python.
+#
+#  MCP Python is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  MCP Python is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+#
+##
+
+##
+# The MCP server 'mcp-python' of the current user, by its Helm chart, in a
+# K3s cluster of the user - a Docker container. HTTPS by the Ingress
+# (Traefik of K3s) at port 8443 of 127.0.0.1 ('MCP_PUBLISH_HOST'), in the
+# background, back after a restart of Docker or of the host. The secrets
+# and the environment - see 'mcp-python-container-launcher.bash'.
+#
+# The arguments - [--chart TGZ|DIR] and a command:
+#
+#     mcp-python-chart up               # The cluster and the release.
+#     mcp-python-chart status           # The cluster, the pods, the Ingress.
+#     mcp-python-chart logs             # The log of the server, until Ctrl C.
+#     mcp-python-chart test             # 'helm test'.
+#     mcp-python-chart down             # The cluster removed - all gone.
+#     mcp-python-chart kubectl ...      # 'kubectl' at the cluster.
+#     mcp-python-chart helm ...         # 'helm' at the cluster.
+#
+# See mcp-python-chart(1).
+#
+##
+
+set -euo pipefail
+
+for lib in \
+    "$( dirname "$( readlink -f "$0" )" )/../container/mcp-python-container-launcher.bash" \
+    /usr/share/mcp-python-container/mcp-python-container-launcher.bash
+do
+    if [[ -e "${lib}" ]] ; then
+        # shellcheck source=../container/mcp-python-container-launcher.bash
+        source "${lib}"
+        break
+    fi
+done
+declare -F mcpl_secrets >/dev/null || { echo "$( basename "$0" ): No 'mcp-python-container-launcher.bash' (package 'mcp-python-container')." >&2 ; exit 1 ; }
+
+##
+# The chart and its values - of the package, or of the source tree (next to
+# this file). '@...@' - filled in at the package build ('chart/Makefile').
+#
+MCPC_CHART_NAME='@CHART_NAME@'
+MCPC_DIR_SHARE=/usr/share/mcp-python-chart
+MCPC_DIR_HERE="$( dirname "$( readlink -f "$0" )" )"
+if [[ "${MCPC_CHART_NAME}" == @*@ ]] ; then
+    MCPC_CHART_DEFAULT="$( dirname "$( ls "${MCPC_DIR_HERE}"/*/Chart.yaml | head -n 1 )" )"
+    MCPC_VALUES="${MCPC_DIR_HERE}/mcp-python-chart-values.yaml"
+else
+    MCPC_CHART_DEFAULT="${MCPC_DIR_SHARE}/${MCPC_CHART_NAME}-${MCPL_PACKAGE_VERSION}.tgz"
+    MCPC_VALUES="${MCPC_DIR_SHARE}/mcp-python-chart-values.yaml"
+fi
+MCPC_CHART="${MCP_CHART:-${MCPC_CHART_DEFAULT}}"
+
+##
+# The cluster - a K3s container of the user. Docker only: K3s needs a
+# privileged, rootful container, and the image of the server is fed into it
+# by 'docker save' / 'docker exec'.
+#
+MCPC_K3S_IMAGE="${MCP_K3S_IMAGE:-rancher/k3s:v1.31.4-k3s1}"
+MCPC_K3S_NAME="${MCPL_INSTANCE}-k3s"
+MCPC_K3S_API_PORT="${MCP_K3S_API_PORT:-16443}"
+MCPC_INGRESS_PORT="${MCP_INGRESS_PORT:-8443}"
+MCPC_DIR_K3S="${MCPL_DIR_DATA}/k3s"
+export KUBECONFIG="${MCPC_DIR_K3S}/kubeconfig.yaml"
+
+# The release - one per cluster, so the names are fixed.
+MCPC_RELEASE=mcp-python
+MCPC_NAMESPACE=mcp-python
+MCPC_SECRET_TLS=mcp-python-tls
+MCPC_SECRET_TOKENS=mcp-python-tokens
+
+mcpc_usage() {
+    sed -n '/^# The MCP server/,/^##$/p' "$0" | sed -e 's/^# \{0,1\}//' -e '/^#$/d'
+}
+
+mcpc_need() {
+    local tool
+    for tool in "$@" ; do
+        command -v "${tool}" >/dev/null 2>&1 || mcpl_die "No '${tool}' - install it first."
+    done
+}
+
+mcpc_k3s_state() {
+    docker container inspect --format '{{.State.Status}}' "${MCPC_K3S_NAME}" 2>/dev/null || true
+}
+
+##
+# The cluster - made, or started again; the kubeconfig of the user - written.
+# Waits for the node, the cluster DNS and Traefik.
+#
+mcpc_k3s_up() {
+    case "$( mcpc_k3s_state )" in
+        running)
+            ;;
+        '')
+            mcpl_note "Making the K3s cluster '${MCPC_K3S_NAME}' - about a minute."
+            # '/run' on tmpfs - as K3s docs for Docker. Metrics-server - not
+            # needed, the less to download.
+            docker run \
+                --detach \
+                --restart unless-stopped \
+                --privileged \
+                --name "${MCPC_K3S_NAME}" \
+                --hostname "${MCPC_K3S_NAME}" \
+                --tmpfs /run \
+                --tmpfs /var/run \
+                --publish "127.0.0.1:${MCPC_K3S_API_PORT}:6443" \
+                --publish "${MCPL_PUBLISH_HOST}:${MCPC_INGRESS_PORT}:443" \
+                "${MCPC_K3S_IMAGE}" \
+                server \
+                --disable metrics-server \
+                >/dev/null
+            ;;
+        *)
+            docker start "${MCPC_K3S_NAME}" >/dev/null
+            ;;
+    esac
+
+    local i
+    for i in $( seq 60 ) ; do
+        docker exec "${MCPC_K3S_NAME}" test -s /etc/rancher/k3s/k3s.yaml && break
+        sleep 4
+    done
+    # The kubeconfig - cluster admin credentials, a secret of the user too.
+    ( umask 077 ; mkdir -p "${MCPC_DIR_K3S}" )
+    chmod 700 "${MCPC_DIR_K3S}"
+    install --mode=600 /dev/null "${KUBECONFIG}.new"
+    docker exec "${MCPC_K3S_NAME}" cat /etc/rancher/k3s/k3s.yaml \
+        | sed "s#https://127.0.0.1:6443#https://127.0.0.1:${MCPC_K3S_API_PORT}#" \
+        > "${KUBECONFIG}.new"
+    mv "${KUBECONFIG}.new" "${KUBECONFIG}"
+
+    # Traefik - installed by a Helm job of K3s, later than CoreDNS.
+    for i in $( seq 90 ) ; do
+        kubectl --namespace kube-system get deployment coredns traefik >/dev/null 2>&1 && break
+        sleep 4
+    done
+    kubectl wait --for=condition=Ready node --all --timeout=120s >/dev/null
+    kubectl --namespace kube-system rollout status deployment/coredns --timeout=180s >/dev/null
+    kubectl --namespace kube-system rollout status deployment/traefik --timeout=180s >/dev/null
+}
+
+##
+# The image of the server - into the containerd of K3s, if not there yet.
+#
+mcpc_k3s_image() {
+    if docker exec "${MCPC_K3S_NAME}" ctr --namespace k8s.io images ls --quiet \
+        | grep --quiet --line-regexp "docker.io/library/${MCPL_IMAGE}"
+    then
+        return 0
+    fi
+    mcpl_note "Loading the image '${MCPL_IMAGE}' into the cluster."
+    docker save "${MCPL_IMAGE}" \
+        | docker exec --interactive "${MCPC_K3S_NAME}" ctr --namespace k8s.io images import - >/dev/null
+}
+
+##
+# The Secrets of the release - the certificate and the token files of the
+# user. Applied again at each 'up': the pods get a changed client in about a
+# minute, no restart.
+#
+mcpc_secrets_apply() {
+    kubectl create namespace "${MCPC_NAMESPACE}" --dry-run=client --output=yaml \
+        | kubectl apply --filename=- >/dev/null
+    kubectl --namespace "${MCPC_NAMESPACE}" create secret tls "${MCPC_SECRET_TLS}" \
+        --cert="${MCPL_DIR_TLS}/tls.crt" \
+        --key="${MCPL_DIR_TLS}/tls.key" \
+        --dry-run=client --output=yaml \
+        | kubectl apply --filename=- >/dev/null
+    kubectl --namespace "${MCPC_NAMESPACE}" create secret generic "${MCPC_SECRET_TOKENS}" \
+        --from-file="${MCPL_DIR_TOKENS}" \
+        --dry-run=client --output=yaml \
+        | kubectl apply --filename=- >/dev/null
+}
+
+##
+# The hosts of the Ingress - the DNS names of the certificate (an Ingress
+# host is no IP address).
+#
+mcpc_values_hosts() {
+    local names name
+    names="$( openssl x509 -in "${MCPL_DIR_TLS}/tls.crt" -noout -ext subjectAltName \
+        | tr ',' '\n' | sed -n 's/^ *DNS://p' )"
+    echo "ingress:"
+    echo "  hosts:"
+    for name in ${names} ; do
+        echo "    - host: \"${name}\""
+        echo "      paths:"
+        echo "        - path: /mcp"
+        echo "          pathType: Prefix"
+    done
+    echo "  tls:"
+    echo "    - secretName: ${MCPC_SECRET_TLS}"
+    echo "      hosts:"
+    for name in ${names} ; do
+        echo "        - \"${name}\""
+    done
+}
+
+mcpc_up() {
+    [[ -e "${MCPC_CHART}" ]] || mcpl_die "No chart '${MCPC_CHART}' - give one with '--chart' or MCP_CHART."
+    mcpc_need docker kubectl helm openssl
+    [[ "${CONTAINER_TOOL}" == "docker" ]] || mcpl_die "K3s runs in Docker only, not '${CONTAINER_TOOL}'."
+    mcpl_secrets
+    mcpl_image
+    mcpc_k3s_up
+    mcpc_k3s_image
+    mcpc_secrets_apply
+
+    local values_hosts
+    values_hosts="$( mktemp )"
+    # shellcheck disable=SC2064
+    trap "rm -f '${values_hosts}'" EXIT
+    mcpc_values_hosts > "${values_hosts}"
+
+    helm upgrade "${MCPC_RELEASE}" "${MCPC_CHART}" \
+        --install \
+        --namespace "${MCPC_NAMESPACE}" \
+        --values "${MCPC_VALUES}" \
+        --values "${values_hosts}" \
+        --set "image.tag=${MCPL_IMAGE_TAG}" \
+        --set "resources.limits.cpu=${MCPL_CPUS}" \
+        --wait \
+        --timeout 3m \
+        "$@"
+    mcpl_hints "https:${MCPC_INGRESS_PORT}"
+}
+
+# The full name of the release - the one of its Deployment, whatever the
+# chart is named.
+mcpc_fullname() {
+    kubectl --namespace "${MCPC_NAMESPACE}" get deployment \
+        --selector "app.kubernetes.io/instance=${MCPC_RELEASE}" \
+        --output jsonpath='{.items[0].metadata.name}'
+}
+
+mcpc_need_cluster() {
+    [[ "$( mcpc_k3s_state )" == "running" && -e "${KUBECONFIG}" ]] \
+        || mcpl_die "No running cluster '${MCPC_K3S_NAME}' - 'mcp-python-chart up' first."
+}
+
+# The options, before the command.
+while [[ "$#" -gt 0 ]] ; do
+    case "$1" in
+        -h|--help)
+            mcpc_usage
+            exit 0
+            ;;
+        --chart)
+            [[ "$#" -ge 2 ]] || mcpl_die "No path after '--chart'."
+            MCPC_CHART="$2"
+            shift 2
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+command="${1:-}"
+[[ -z "${command}" ]] || shift
+case "${command}" in
+    up)
+        mcpc_up "$@"
+        ;;
+    down)
+        mcpc_need docker
+        if [[ -n "$( mcpc_k3s_state )" ]] ; then
+            # '--volumes' - the state of the cluster goes with it.
+            docker rm --force --volumes "${MCPC_K3S_NAME}" >/dev/null
+            mcpl_note "Removed the K3s cluster '${MCPC_K3S_NAME}'."
+        fi
+        rm -rf "${MCPC_DIR_K3S}"
+        ;;
+    status)
+        mcpc_need docker kubectl
+        echo "Cluster '${MCPC_K3S_NAME}': $( mcpc_k3s_state | sed 's/^$/absent/' )"
+        mcpc_need_cluster
+        kubectl --namespace "${MCPC_NAMESPACE}" get pods,services,ingresses
+        ;;
+    logs)
+        mcpc_need kubectl
+        mcpc_need_cluster
+        exec kubectl --namespace "${MCPC_NAMESPACE}" logs --follow --timestamps --tail 100 \
+            "deployment/$( mcpc_fullname )" "$@"
+        ;;
+    test)
+        mcpc_need helm kubectl
+        mcpc_need_cluster
+        # Not '--logs' - the pod of a passed test is deleted by its hook
+        # policy before the logs are asked for. The pod of a failed test
+        # stays - its logs are shown.
+        helm test "${MCPC_RELEASE}" --namespace "${MCPC_NAMESPACE}" "$@" \
+            || { kubectl --namespace "${MCPC_NAMESPACE}" logs "$( mcpc_fullname )-test-connection" ; exit 1 ; }
+        ;;
+    kubectl|helm)
+        mcpc_need "${command}"
+        mcpc_need_cluster
+        exec "${command}" "$@"
+        ;;
+    '')
+        echo "Usage: $( basename "$0" ) [--chart TGZ|DIR] up | status | logs | test | down | kubectl ... | helm ... See '--help'." >&2
+        exit 1
+        ;;
+    *)
+        mcpl_die "Unknown command '${command}'. See '--help'."
+        ;;
+esac

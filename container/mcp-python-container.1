@@ -1,0 +1,194 @@
+.\"
+.\"  Copyright 2026 Alex Vesev
+.\"
+.\"  This file is part of MCP Python - Model Context Protocol server to
+.\"  provide Python.
+.\"
+.\"  MCP Python is free software: you can redistribute it and/or modify
+.\"  it under the terms of the GNU General Public License as published by
+.\"  the Free Software Foundation, either version 3 of the License, or
+.\"  (at your option) any later version.
+.\"
+.\"  MCP Python is distributed in the hope that it will be useful,
+.\"  but WITHOUT ANY WARRANTY; without even the implied warranty of
+.\"  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+.\"  GNU General Public License for more details.
+.\"
+.\"  You should have received a copy of the GNU General Public License
+.\"  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+.\"
+.\"##
+.\"
+.\" Manual page of "mcp-python-container" - the launcher of the MCP server
+.\" "mcp-python" in a Docker container, for the current user. The secrets,
+.\" the environment and the security are described here for
+.\" "mcp-python-compose" too.
+.\"
+.\" View the source: man ./container/mcp-python-container.1
+.TH MCP-PYTHON-CONTAINER 1 2026-11-15 "mcp-python-container" "User Commands"
+.SH NAME
+mcp-python-container \- the MCP server mcp-python of the current user, in a Docker container
+.SH SYNOPSIS
+.B mcp-python-container
+.RI [ "docker run options" ]
+.br
+.B mcp-python-container secrets
+.br
+.B mcp-python-container
+.RB { \-h | \-\-help }
+.SH DESCRIPTION
+.B mcp-python-container
+starts the
+.BR mcp-python (8)
+server - an MCP server, which runs a Python 3 code for its clients - in a
+container of the local Docker, as a service of the user who runs it, with
+.BR "docker run" :
+in the foreground, until Ctrl C. No image registry is needed and no Python
+at the host. The same server in the background -
+.BR mcp-python-compose (1).
+.PP
+HTTP at port
+.B 8765
+and HTTPS at port
+.BR 8766 ,
+published at
+.B 127.0.0.1
+of the host
+.RB ( MCP_PUBLISH_HOST ).
+The arguments are more options of
+.BR "docker run" ,
+e.g.
+.BR "\-\-env MCP_EXEC_TIMEOUT=120" .
+.PP
+At each start, before the container, the launcher (and
+.BR mcp-python-compose (1)
+too):
+.IP \(bu 2
+makes the secrets, which are absent - only those (see FILES);
+.IP \(bu 2
+sets their access modes - readable by the user only;
+.IP \(bu 2
+loads the image from the archive of the package, if the local Docker has
+no image of the version of the package;
+.IP \(bu 2
+prints a
+.B curl
+command per listener, to check it.
+.PP
+.B mcp-python-container secrets
+does the first two only, with no container and no Docker, and prints the
+paths as the settings of the server
+.RB ( MCP_TLS_CERT ,
+.BR MCP_TLS_KEY ,
+.BR MCP_AUTH_TOKENS )
+and the token of the client
+.RB ( MCP_CLIENT_TOKEN ).
+.SH FILES
+.TP
+.I ~/.local/share/mcp-python/
+The secrets of the user
+.RB ( MCP_DATA_DIR ).
+The directories - mode 0700.
+.TP
+.I tls/tls.key\fR, \fPtls/tls.crt
+The key (mode 0600) and the self-signed certificate of the HTTPS listener,
+for
+.BR localhost ,
+.B 127.0.0.1
+and the full and the short name of the host. A client has to trust the
+certificate - see
+.BR mcp-python (8),
+HTTPS WITH A SELF-SIGNED CERTIFICATE; the launchers do not do it.
+.TP
+.I tokens/<client>
+The SHA-256 of the token of a client, mode 0600 - the file the server
+reads.
+.TP
+.I clients/<client>.token
+The token itself, mode 0600 - for the client, in the header
+.BR "Authorization: Bearer <token>" .
+.TP
+.I /usr/lib/mcp-python-container/mcp-python_<version>_container.run
+The image as a self-extracting archive - see its
+.BR \-\-help .
+.SH ENVIRONMENT
+.TP
+.B CONTAINER_TOOL
+.B docker
+(default) or
+.BR podman .
+.TP
+.B MCP_CLIENT
+The client to make a token for, if absent. Default - the user name.
+.TP
+.B MCP_DATA_DIR
+The directory of the secrets. Default
+.IR ${XDG_DATA_HOME:\-~/.local/share}/mcp-python .
+.TP
+.B MCP_IMAGE_TAG
+The tag of the image
+.BR mcp-python .
+Default - the version of the package.
+.TP
+.B MCP_PUBLISH_HOST
+The host address of the listeners. Default
+.BR 127.0.0.1 .
+.TP
+.B MCP_CPUS
+The CPUs limit of the container, as a number of CPUs. Default - 75% of the
+CPUs of the host.
+.SH SECURITY
+The container starts as root with three capabilities only
+.RB ( SETUID ,
+.BR SETGID ,
+.BR DAC_READ_SEARCH ).
+The server reads the key and the token files - files of the user, mode
+0600 - then drops to its own account in the container, and the
+capabilities are gone. A submitted code runs as that account and can not
+read the secrets. The rest - a read only file system, the scratch is the
+only writable place, memory, processes and CPUs limits - as the Systemd
+unit of
+.BR mcp-python (8)
+has.
+.PP
+The token files are read once, at the start
+.RB ( MCP_AUTH_RELOAD_PERIOD=once ).
+A client added or removed - a restart of the server.
+.PP
+The certificate is not renewed. Expired - a warning at the start; a new
+one - delete
+.I tls
+and start again.
+.SH EXAMPLES
+The server, until Ctrl C:
+.PP
+.RS
+.EX
+mcp-python-container
+.EE
+.RE
+.PP
+One more client - its token in
+.IR clients/laptop.token ,
+at the next start:
+.PP
+.RS
+.EX
+MCP_CLIENT=laptop mcp-python-container
+.EE
+.RE
+.PP
+A client removed - then a restart:
+.PP
+.RS
+.EX
+rm ~/.local/share/mcp-python/tokens/laptop \e
+   ~/.local/share/mcp-python/clients/laptop.token
+.EE
+.RE
+.SH SEE ALSO
+.BR mcp-python-compose (1),
+.BR mcp-python (8),
+.BR mcp-python-token (8),
+.BR docker-run (1),
+.BR curl (1)

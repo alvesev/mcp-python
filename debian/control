@@ -1,0 +1,24 @@
+Source: mcp-python
+Section: python
+Priority: optional
+Maintainer: noname <noname@nohost>
+Build-Depends: debhelper (>= 10), cdbs, python3, python3-venv
+Standards-Version: 3.9.3
+Homepage: https://
+
+Package: mcp-python
+Architecture: all
+Depends: ${misc:Depends}, python3 (>= 3.10), python3-venv, adduser, bash
+Recommends: coreutils
+Description: MCP server - runs a Python 3 code at the host.
+ Model Context Protocol (MCP) server, over Streamable HTTP (HTTP, HTTPS or
+ both), with tools to run a Python 3 code, submitted by an MCP client, in
+ a fresh interpreter process.
+ .
+ The server Python packages are installed at the package configuration,
+ into a virtual environment of the host 'python3', from the Python package
+ index pip is configured for - the exact set of 'requirements.lock'. The
+ configuration - '/etc/mcp-python/mcp-python.conf', the service -
+ 'mcp-python.service'. Authentication - a bearer token per client, see
+ 'mcp-python-token'; no clients after the installation. 'shred'
+ (coreutils) overwrites the token files at a purge.

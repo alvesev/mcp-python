@@ -1,0 +1,57 @@
+mcp-python (0.5.0) zara; urgency=low
+
+  * Stand alone launchers are distributed in a packages.
+  * Release workflow.
+
+ -- Alex Vesev <alex.vesev@gmail.com>  Sun, 15 Nov 2026 10:32:38 +0100
+
+mcp-python (0.4.2) zara; urgency=low
+
+  * Artifacts packaging.
+  * Artifacts naming.
+  * Release workflow.
+  * Documentation.
+
+ -- Alex Vesev <alex.vesev@gmail.com>  Sat, 14 Nov 2026 17:49:47 +0100
+
+mcp-python (0.4.0) zara; urgency=low
+
+  * Authentication - a bearer token per client; 'mcp-python-token' manages
+    the clients.
+  * The token files are overwritten with 'shred' at the package purge.
+
+ -- Alex Vesev <alex.vesev@gmail.com>  Sat, 14 Nov 2026 13:56:28 +0100
+
+mcp-python (0.3.0) zara; urgency=low
+
+  * Container usage capability added.
+
+ -- Alex Vesev <alex.vesev@gmail.com>  Tue, 10 Nov 2026 16:49:08 +0100
+
+mcp-python (0.2.2) zara; urgency=low
+
+  * Termination signals processing.
+  * Errors logging supplemented.
+  * Internal parts split by a logic.
+
+ -- Alex Vesev <alex.vesev@gmail.com>  Tue, 10 Nov 2026 11:04:33 +0100
+
+mcp-python (0.2.1) zara; urgency=low
+
+  * Documentation - 'man' page 'mcp-python' created.
+
+ -- Alex Vesev <alex.vesev@gmail.com>  Sun, 08 Nov 2026 20:08:36 +0100
+
+mcp-python (0.2.0) noname; urgency=low
+
+  * The server virtual environment is created at the package configuration,
+    with the host 'python3'; the build ships its reference package set only
+    ('requirements.lock').
+
+ -- Alex Vesev <alex.vesev@gmail.com>  Sun, 08 Nov 2026 16:00:00 +0200
+
+mcp-python (0.1.0) noname; urgency=low
+
+  * MCP server - Python 3 interpreter, moved from the Ecumene role 'mcp'.
+
+ -- Alex Vesev <alex.vesev@gmail.com>  Sun, 08 Nov 2026 12:00:00 +0200

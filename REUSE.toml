@@ -1,0 +1,6 @@
+version = 1
+
+[[annotations]]
+path = "doc/*.dia"
+SPDX-FileCopyrightText = "2026 Alex Vesev"
+SPDX-License-Identifier = "CC-BY-4.0"

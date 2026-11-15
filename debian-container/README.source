@@ -1,0 +1,62 @@
+mcp-python-container - notes on the packaging
+=============================================
+
+The staged build
+----------------
+
+'dpkg-buildpackage' knows the directory 'debian' only, and that one is of
+the package 'mcp-python'. So this package is built in a tree of its own,
+'build/deb-container/mcp-python-container-<version>', staged by 'make
+container-package-deb' ('container/Makefile'):
+
+ * 'debian' - a copy of this directory, the symbolic links ('compat',
+   'copyright' - the ones of 'debian') replaced by the files.
+
+ * 'container' - a copy of the directory 'container' of the source tree.
+
+ * 'mcp-python_<version>_container.run' - the image, of 'make
+   container-package'.
+
+The outputs of 'dpkg-buildpackage' are moved from 'build/deb-container' to
+'artifacts', the stage is removed.
+
+The changelog
+-------------
+
+'debian-container/changelog' is kept by hand, apart from 'debian/changelog'
+- an entry can tell about this package only. The versions are the same: the
+'.run' file is of the version of 'debian/changelog', and 'make
+container-package-deb' stops if the top entries differ ('deb-version-check'
+of 'container/Makefile'). 'make generate-rel-info' adds an entry to both.
+
+The files of the package
+------------------------
+
+Nothing is built in the stage - 'debian/rules' has the debhelper rules of
+CDBS only, no build class. The files are put into the package by
+'dh_install', by the list of 'debian-container/install', with the paths
+relative to the stage. A file of 'container' - a line as:
+
+    container/docker-compose.yml usr/share/mcp-python-container/
+
+The launchers
+-------------
+
+'mcp-python-container' and 'mcp-python-compose' (in '/usr/bin') share
+'mcp-python-container-launcher.bash' - found next to the launcher (the
+source tree, 'container'), or in '/usr/share/mcp-python-container'. So is
+the compose file. The version of the image in
+'mcp-python-container-launcher.bash' is filled in at the staging
+('@PACKAGE_VERSION@'); in the source tree it stays, and the launchers take
+the tag 'latest' - the image of 'make container'.
+
+A manual page per launcher; the secrets, the environment and the security
+- in 'mcp-python-container.1' only, the other one refers to it.
+
+The architecture of the package is the one of the image - the one of the
+host it is built at ('Architecture: any'). So the '.run' file is in
+'/usr/lib/mcp-python-container' - architecture dependent data; the rest of
+the data is in '/usr/share/mcp-python-container'.
+
+The image is not loaded at the installation - a container engine may be not
+there, or not running. The '.run' file does it, run by the administrator.

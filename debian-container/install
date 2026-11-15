@@ -1,0 +1,5 @@
+*_container.run usr/lib/mcp-python-container/
+container/mcp-python-container usr/bin/
+container/mcp-python-compose usr/bin/
+container/mcp-python-container-launcher.bash usr/share/mcp-python-container/
+container/docker-compose.yml usr/share/mcp-python-container/

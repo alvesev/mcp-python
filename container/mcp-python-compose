@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+#
+#  Copyright 2026 Alex Vesev
+#
+#  This file is part of MCP Python - Model Context Protocol server to
+#  provide Python.
+#
+#  MCP Python is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  MCP Python is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+#
+##
+
+##
+# The MCP server 'mcp-python' of the current user, by Docker Compose - HTTPS
+# at port 8766 of 127.0.0.1 ('MCP_PUBLISH_HOST'), in the background, back
+# after a restart of Docker or of the host. The Compose project - one per
+# user. The secrets and the environment - see
+# 'mcp-python-container-launcher.bash'.
+#
+# The arguments - a command of 'docker compose'; 'up' is 'up --detach':
+#
+#     mcp-python-compose up             # Start.
+#     mcp-python-compose logs --follow  # The log, until Ctrl C.
+#     mcp-python-compose restart        # A client added or removed.
+#     mcp-python-compose down           # Stop and remove.
+#
+# See mcp-python-compose(1). The settings of the container - 'docker-compose.yml' next to
+# 'mcp-python-container-launcher.bash'.
+#
+##
+
+set -euo pipefail
+
+for lib in \
+    "$( dirname "$( readlink -f "$0" )" )/mcp-python-container-launcher.bash" \
+    /usr/share/mcp-python-container/mcp-python-container-launcher.bash
+do
+    if [[ -e "${lib}" ]] ; then
+        # shellcheck source=mcp-python-container-launcher.bash
+        source "${lib}"
+        break
+    fi
+done
+declare -F mcpl_secrets >/dev/null || { echo "$( basename "$0" ): No 'mcp-python-container-launcher.bash'." >&2 ; exit 1 ; }
+
+case "${1:-}" in
+    -h|--help)
+        sed -n '/^# The MCP server/,/^##$/p' "$0" | sed -e 's/^# \{0,1\}//' -e '/^#$/d'
+        exit 0
+        ;;
+esac
+
+case "${1:-}" in
+    '')
+        echo "Usage: $( basename "$0" ) up | COMMAND [ARGUMENTS] - a command of 'docker compose'. See '--help'." >&2
+        exit 1
+        ;;
+    up)
+        # In the background - the Compose project is a service of the user.
+        shift
+        set -- up --detach "$@"
+        ;;
+esac
+
+# The secrets and the image - for the commands, which start the container.
+case "$1" in
+    up|start|restart|create|run)
+        mcpl_secrets
+        mcpl_image
+        ;;
+esac
+
+export PACKAGE_NAME="${MCPL_PACKAGE_NAME}"
+export MCP_IMAGE_TAG="${MCPL_IMAGE_TAG}"
+export MCP_TLS_DIR="${MCPL_DIR_TLS}"
+export MCP_TOKENS_DIR="${MCPL_DIR_TOKENS}"
+export MCP_AUTH_RELOAD_PERIOD=once
+export MCP_PUBLISH_HOST="${MCPL_PUBLISH_HOST}"
+export MCP_CPUS="${MCPL_CPUS}"
+
+"${CONTAINER_TOOL}" compose \
+    --project-name "${MCPL_INSTANCE}" \
+    --file "${MCPL_DIR_SHARE}/docker-compose.yml" \
+    "$@"
+
+if [[ "$1" == "up" || "$1" == "start" || "$1" == "restart" ]] ; then
+    mcpl_hints https:8766
+fi

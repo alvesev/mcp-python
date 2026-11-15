@@ -1,0 +1,15 @@
+Source: mcp-python-chart
+Section: admin
+Priority: optional
+Maintainer: noname <noname@nohost>
+Build-Depends: debhelper (>= 10), cdbs
+Standards-Version: 3.9.3
+Homepage: https://
+
+Package: mcp-python-chart
+Architecture: all
+Depends: ${misc:Depends}, mcp-python-container (= ${binary:Version}), openssl
+Recommends: docker.io | docker-ce
+Description: MCP server - runs a Python 3 code, as a Helm chart.
+ The Helm chart of the MCP server 'mcp-python', and the launcher to run it
+ for the current user in a K3s cluster: 'mcp-python-chart'.

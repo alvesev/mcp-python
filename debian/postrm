@@ -1,0 +1,66 @@
+#!/bin/sh
+#
+#  Copyright 2026 Alex Vesev
+#
+#  This file is part of MCP Python - Model Context Protocol server to
+#  provide Python.
+#
+#  MCP Python is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  MCP Python is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+#
+##
+
+set -e
+
+#DEBHELPER#
+
+case "$1" in
+    remove)
+        # Created by 'postinst', not known to dpkg.
+        rm -rf \
+            /var/lib/mcp-python/venv \
+            /var/lib/mcp-python/venv.new \
+            /var/lib/mcp-python/venv.old
+        ;;
+    purge)
+        rm -rf /var/lib/mcp-python /var/log/mcp-python
+
+        ##
+        # The token files - made by 'mcp-python-token', not known to dpkg.
+        # Kept at a removal, as the configuration is. Overwritten before the
+        # deletion, if 'shred' is there (coreutils, recommended only) - no
+        # 'shred' or a failure of it is a message, not a failed purge.
+        # This is the reason the package 'coreutils' is declared as the 
+        # dependency in the 'Recommends' section of the package properties.
+        #
+        if [ -d /etc/mcp-python/tokens ] ; then
+            if command -v shred > /dev/null 2>&1 ; then
+                find \
+                    /etc/mcp-python/tokens \
+                    -type f \
+                    -exec shred \
+                            --force \
+                            --zero \
+                            --remove \
+                            {} + \
+                        || echo "mcp-python: 'shred' failed - the token files are deleted without overwriting." >&2
+            else
+                echo "mcp-python: no 'shred' (package 'coreutils') - the token files are deleted without overwriting." >&2
+            fi
+            rm -rf /etc/mcp-python/tokens
+        fi
+        rmdir -v --ignore-fail-on-non-empty /etc/mcp-python 2> /dev/null || true
+        ;;
+esac
+
+exit 0

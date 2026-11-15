@@ -1,0 +1,53 @@
+#
+#  Copyright 2026 Alex Vesev
+#
+#  This file is part of MCP Python - Model Context Protocol server to
+#  provide Python.
+#
+#  MCP Python is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  MCP Python is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+#
+##
+
+[Unit]
+Description=MCP server - Python 3 interpreter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Started as root - the server reads the TLS key, then drops to MCP_USER itself.
+WorkingDirectory=/var/lib/mcp-python
+EnvironmentFile=/etc/mcp-python/mcp-python.conf
+ExecStart=/var/lib/mcp-python/venv/bin/python /usr/lib/mcp-python/mcp-python.py
+Restart=on-failure
+RestartSec=5
+
+# Hardening - a submitted code runs with the rights of this service.
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID
+ProtectSystem=strict
+ReadWritePaths=/var/lib/mcp-python/scratch
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+MemoryMax=1G
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

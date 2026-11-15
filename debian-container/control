@@ -1,0 +1,17 @@
+Source: mcp-python-container
+Section: admin
+Priority: optional
+Maintainer: noname <noname@nohost>
+Build-Depends: debhelper (>= 10), cdbs
+Standards-Version: 3.9.3
+Homepage: https://
+
+Package: mcp-python-container
+Architecture: any
+Depends: ${misc:Depends}, openssl
+Recommends: docker.io | docker-ce | podman
+Suggests: docker-compose-v2 | docker-compose-plugin
+Description: MCP server - runs a Python 3 code, as a container.
+ The container image of the MCP server 'mcp-python', and the launchers to
+ run it for the current user: 'mcp-python-container' (Docker) and
+ 'mcp-python-compose' (Docker Compose).

@@ -1,0 +1,806 @@
+.\"
+.\"  Copyright 2026 Alex Vesev
+.\"
+.\"  This file is part of MCP Python - Model Context Protocol server to
+.\"  provide Python.
+.\"
+.\"  MCP Python is free software: you can redistribute it and/or modify
+.\"  it under the terms of the GNU General Public License as published by
+.\"  the Free Software Foundation, either version 3 of the License, or
+.\"  (at your option) any later version.
+.\"
+.\"  MCP Python is distributed in the hope that it will be useful,
+.\"  but WITHOUT ANY WARRANTY; without even the implied warranty of
+.\"  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+.\"  GNU General Public License for more details.
+.\"
+.\"  You should have received a copy of the GNU General Public License
+.\"  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+.\"
+.\"##
+.\"
+.\" Manual page of "mcp-python" - MCP server, which runs a Python 3 code
+.\" at a host.
+.\"
+.\" View the source: man ./src/mcp-python.8
+.TH MCP-PYTHON 8 2026-11-14 "mcp-python 0.0.0" "System Administration"
+.SH NAME
+mcp-python \- MCP server, which runs a Python 3 code at the host
+.SH SYNOPSIS
+.B systemctl
+.RB { start | stop | restart | status }
+.B mcp-python
+.PP
+.B /var/lib/mcp-python/venv/bin/python /usr/lib/mcp-python/mcp-python.py
+.SH DESCRIPTION
+.B mcp-python
+is a Model Context Protocol (MCP) server over Streamable HTTP. A client
+submits a Python 3 code, the server runs it in a fresh interpreter process
+and returns the output. A client proves itself with a bearer token - see
+AUTHENTICATION.
+.PP
+Each call is a separate process - no state between calls. The working
+directory of a call is an empty temporary directory under
+.BR MCP_SCRATCH ,
+removed after the call. The code runs as
+.B "python3 \-I \-c"
+with the
+.B MCP_WORK_PYTHON
+interpreter;
+.B \-I
+isolates the Python import path only, it is not a security boundary.
+.PP
+The server takes no command line options - the configuration comes from
+the environment. The Systemd unit
+.B mcp-python.service
+reads it from
+.IR /etc/mcp-python/mcp-python.conf .
+.PP
+Started as root, the server reads the TLS certificate and key into memory,
+then drops the privileges to
+.B MCP_USER
+(no supplementary groups) and only then serves. A submitted code runs as
+.B MCP_USER
+and can not read the key file. The server refuses to serve as root, if
+.B MCP_USER
+is not set.
+.SH TOOLS
+.TP
+.BI run_python( code ", " timeout_s )
+Runs
+.I code
+and returns
+.BR returncode ,
+.BR stdout ,
+.B stderr
+and
+.BR timed_out .
+.I timeout_s
+(seconds, default 30) is capped by
+.BR MCP_EXEC_TIMEOUT .
+A code, which outlives the timeout, is killed. Standard input is
+.IR /dev/null .
+.TP
+.B python_info()
+Reports the version and the installed packages of the
+.B MCP_WORK_PYTHON
+interpreter.
+.SH AUTHENTICATION
+Each client has a token of its own and sends it with every request, in the
+HTTP header
+.BR "Authorization: Bearer <token>" .
+A request without a known token is refused with the status
+.BR 401 .
+.PP
+The clients are the files of the directory
+.B MCP_AUTH_TOKENS
+\- a file per client, the file name is the client name. A file keeps the
+SHA-256 of the token, not the token: a submitted code may read the files
+of the server, and here it finds nothing to connect with. The token itself
+is shown once, when the client is added - it can not be shown again, only
+replaced by a new one.
+.PP
+The files are managed with
+.BR mcp-python-token (8)
+\- the commands, the names and the format of a file are described there:
+.PP
+.RS
+.EX
+sudo mcp-python-token add laptop
+sudo mcp-python-token list
+sudo mcp-python-token remove laptop
+.EE
+.RE
+.PP
+The server reads the directory again by itself, at most once per 5
+seconds
+.RB ( MCP_AUTH_RELOAD_PERIOD )
+- no restart: within that time a new client is accepted and a
+removed one is refused, the sessions of the other clients stay. A session
+belongs to the client, which opened it. The files with a leading dot are
+skipped; a file with another content is skipped too, with a line in the
+log.
+.PP
+With no clients every request is refused, and the log says so - it is the
+state after the installation.
+.B MCP_AUTH=none
+turns the authentication off.
+.SH ENVIRONMENT
+.TP
+.B MCP_HOST
+Listen address. Default
+.BR 127.0.0.1 .
+.TP
+.B MCP_HTTP_VARIANT
+Which listeners to start -
+.BR HTTP ,
+.B HTTPS
+or
+.BR both .
+Default
+.BR HTTP .
+.TP
+.B MCP_PORT
+HTTP listen port. Default
+.BR 8765 .
+.TP
+.B MCP_PORT_HTTPS
+HTTPS listen port. Default
+.BR 8766 .
+.TP
+.BR MCP_TLS_CERT ", " MCP_TLS_KEY
+TLS certificate and key (PEM), for HTTPS.
+.TP
+.B MCP_USER
+Account to serve as, and so to run a submitted code as. The package
+creates the system account
+.BR mcp-python .
+.TP
+.B MCP_WORK_PYTHON
+Interpreter for a submitted code, e.g. of a virtual environment with the
+packages a client needs. Default
+.BR python3 ;
+the package configuration sets
+.IR /usr/bin/python3 .
+.TP
+.B MCP_SCRATCH
+Directory for the per call temporary directories; must be writable by
+.BR MCP_USER .
+Default
+.IR /tmp ;
+the package configuration sets
+.IR /var/lib/mcp-python/scratch .
+.TP
+.B MCP_EXEC_TIMEOUT
+Seconds, upper limit for a single
+.B run_python
+call. Default
+.BR 60 .
+.TP
+.B MCP_OUTPUT_LIMIT
+Characters of
+.B stdout
+and
+.B stderr
+(each) returned to a client; the rest is cut. Default
+.BR 65536 .
+.TP
+.B MCP_AUTH
+Authentication of the clients -
+.B token
+or
+.BR none .
+Default
+.BR token .
+.TP
+.B MCP_AUTH_TOKENS
+Directory of the token files, a file per client; must be readable by
+.BR MCP_USER ,
+unless
+.B MCP_AUTH_RELOAD_PERIOD
+is
+.BR once .
+Default
+.IR /etc/mcp-python/tokens .
+.TP
+.B MCP_AUTH_RELOAD_PERIOD
+Seconds between the reads of
+.BR MCP_AUTH_TOKENS ,
+or
+.BR once :
+the files are read at start, by root, before the privileges drop, and
+never again - they may be readable by root only, so a submitted code can
+not read even the hashes; a change of the clients needs a restart. An
+unreadable directory stops the start. Default
+.BR 5 .
+.SH FILES
+.TP
+.I /etc/mcp-python/mcp-python.conf
+Configuration - environment of the unit. After a change:
+.BR "systemctl restart mcp-python" .
+.TP
+.I /etc/mcp-python/tokens
+The clients - see AUTHENTICATION. The directory is of root, readable by
+the group
+.BR mcp-python .
+Kept at the package removal; deleted at the purge - the files are
+overwritten with
+.BR shred (1)
+first, if it is installed.
+.TP
+.I /usr/sbin/mcp-python-token
+The clients management - see
+.BR mcp-python-token (8).
+.TP
+.I /usr/lib/systemd/system/mcp-python.service
+The Systemd unit. Hardening:
+.BR ProtectSystem=strict ,
+.BR ProtectHome=yes ,
+.BR PrivateTmp=yes ,
+.BR PrivateDevices=yes ,
+.BR MemoryMax=1G ,
+.B TasksMax=64
+and more - only
+.I /var/lib/mcp-python/scratch
+is writable for the service.
+.TP
+.I /usr/lib/mcp-python/mcp-python.py
+The server launcher - listeners, TLS, privileges drop.
+.TP
+.I /usr/lib/mcp-python/mcp_tools.py
+The MCP tools.
+.TP
+.I /usr/lib/mcp-python/mcp_auth.py
+The authentication - and
+.B mcp-python-token
+itself.
+.TP
+.I /var/lib/mcp-python/venv
+Virtual environment of the server - created at the package configuration,
+with the host
+.BR python3 ,
+from the Python package index pip is configured for. Removed at the
+package removal.
+.TP
+.IR /usr/share/mcp-python/requirements.txt ", " /usr/share/mcp-python/requirements.lock
+Packages of the server virtual environment, and their exact set of the
+build reference (constraints).
+.TP
+.I /var/lib/mcp-python/scratch
+Per call temporary directories.
+.TP
+.I /var/log/mcp-python/venv-create.log
+Log of the last virtual environment creation;
+.I venv-create.log.1
+\- of the one before it.
+.SH SECURITY
+A client with a valid token executes a code as
+.BR MCP_USER .
+The authentication decides, who gets in - it does not separate the clients
+from each other: every token gives the same, full code execution.
+.PP
+The network, the processes and the other clients' calls are not limited -
+a code has everything
+.B MCP_USER
+has, minus what the Systemd unit takes away.
+.PP
+A token over plain HTTP is readable on the wire. Beyond the local host use
+the HTTPS listener, or TLS in front of the server; the server logs a
+warning for an HTTP listener at a non-loopback address. TLS alone protects
+the traffic only - it is no authentication.
+.PP
+A token does not expire - it is valid until its file is removed. Never
+pass a token to the server side through the environment - a submitted code
+inherits it.
+.PP
+With
+.B MCP_AUTH=none
+any host, which reaches a listener, executes a code. With the default
+.B MCP_HOST=127.0.0.1
+it is every local user and process of the host.
+.SH EXAMPLES
+Start the server and follow its log:
+.PP
+.RS
+.EX
+systemctl enable \-\-now mcp-python
+journalctl \-u mcp-python \-f
+.EE
+.RE
+.PP
+Add a client, then connect Claude Code to a local server with the token
+printed:
+.PP
+.RS
+.EX
+sudo mcp-python-token add laptop
+claude mcp add \-\-transport http python3 http://127.0.0.1:8765/mcp \e
+    \-\-header "Authorization: Bearer <token>"
+.EE
+.RE
+.SH CONTAINER
+The container image has the file tree of the package, the account
+.B mcp-python
+and the server virtual environment, created at the image build. There is
+no Systemd - the server is the process of the container, started as
+.BR mcp-python ,
+and the configuration is the environment of the container
+.RB ( \-\-env ", " \-\-env-file ).
+.I /etc/mcp-python/mcp-python.conf
+of the image is a reference, it is not read. The image sets
+.BR MCP_HOST=0.0.0.0 ,
+.BR MCP_HTTP_VARIANT=HTTP ,
+.BR MCP_USER=mcp-python ,
+.B MCP_WORK_PYTHON=/usr/local/bin/python3
+and
+.BR MCP_SCRATCH=/var/lib/mcp-python/scratch .
+.PP
+The image has no clients - the token files come from outside, as a
+directory
+.RI ( <tokens-dir>
+below) mounted read only at
+.IR /etc/mcp-python/tokens ,
+the default of
+.BR MCP_AUTH_TOKENS .
+They have to be readable by the account of the container, as the
+ones made by
+.B mcp-python-token
+are. At a host without the package - from the source tree:
+.PP
+.RS
+.EX
+python3 src/mcp_auth.py \-\-dir <tokens-dir> add laptop
+.EE
+.RE
+.PP
+Never a token in
+.B \-\-env
+\- see SECURITY. In Kubernetes the same directory is a Secret, a key per
+client, mounted as a volume -
+.B auth.secretName
+of the Helm chart. A client is added or revoked by applying the Secret
+again: the files of the pods follow in about a minute, no restart. Without
+the Secret there are no clients - every request is refused.
+.PP
+Build the image (from the source tree) and launch it, with the limits the
+Systemd unit has - only the scratch is writable:
+.PP
+.RS
+.EX
+make container
+docker run \-\-rm \-\-init \-\-read-only \e
+    \-\-tmpfs /var/lib/mcp-python/scratch:mode=1777 \e
+    \-\-cap-drop ALL \-\-security-opt no-new-privileges \e
+    \-\-memory 1g \-\-pids-limit 64 \e
+    \-\-volume <tokens-dir>:/etc/mcp-python/tokens:ro \e
+    \-\-publish 127.0.0.1:8765:8765 \e
+    mcp-python
+.EE
+.RE
+.PP
+.B make container-launch
+does it by
+.BR mcp-python-container (1),
+with the client
+.B dev
+of the source tree - the secrets in
+.IR build/mcp-python
+(the token -
+.IR build/mcp-python/clients/dev.token ),
+HTTP and HTTPS.
+Which host addresses reach the listener is up to
+.B \-\-publish
+- see SECURITY.
+.PP
+HTTPS - start as root, with the two capabilities the privileges drop
+needs; the server reads the key, then drops to
+.B MCP_USER
+itself, as at a host. The key file has to be owned by root - without
+other capabilities root reads only its own files:
+.PP
+.RS
+.EX
+docker run \-\-rm \-\-init \-\-read-only \e
+    \-\-tmpfs /var/lib/mcp-python/scratch:mode=1777 \e
+    \-\-user root \-\-cap-drop ALL \-\-cap-add SETUID \-\-cap-add SETGID \e
+    \-\-security-opt no-new-privileges \e
+    \-\-volume <tokens-dir>:/etc/mcp-python/tokens:ro \e
+    \-\-volume /etc/ssl/certs/mcp-python.crt:/run/tls.crt:ro \e
+    \-\-volume /etc/ssl/private/mcp-python.key:/run/tls.key:ro \e
+    \-\-env MCP_HTTP_VARIANT=HTTPS \e
+    \-\-env MCP_TLS_CERT=/run/tls.crt \-\-env MCP_TLS_KEY=/run/tls.key \e
+    \-\-publish 127.0.0.1:8766:8766 \e
+    mcp-python
+.EE
+.RE
+.PP
+Packages for a submitted code - an image on top, with them installed for
+the
+.B MCP_WORK_PYTHON
+interpreter:
+.PP
+.RS
+.EX
+FROM mcp-python
+USER root
+RUN /usr/local/bin/python3 \-m pip install \-\-no-cache-dir numpy
+USER mcp-python
+.EE
+.RE
+.SH HTTPS WITH A SELF-SIGNED CERTIFICATE
+An agent (an MCP client - Claude Code, Claude Desktop, MCP Inspector, a
+script) reaches the server over Streamable HTTP at the path
+.IR /mcp .
+Over HTTPS with a self-signed certificate two conditions must hold at the
+agent side:
+.IP 1. 4
+The host part of the URL - a name or an address, by which the agent
+reaches the server - is in the Subject Alternative Name of the
+certificate: a name as
+.BR DNS: ,
+an address as
+.BR IP: .
+Otherwise the host name check of TLS fails. The Common Name of the
+certificate is not checked by current clients. A host with several names
+or addresses is reachable over HTTPS by those of them only, which the
+certificate lists.
+.IP 2. 4
+The agent trusts the certificate. A self-signed certificate is its own
+CA, so it must be added to the trust store the agent uses - and not every
+runtime uses the OS store.
+.PP
+Names used below:
+.TP 14
+.I <host>
+A name or an address, by which the agent reaches the server; listed in
+the Subject Alternative Name of the certificate.
+.TP
+.I <cert-file>
+A copy of the certificate (PEM, public part) at the agent machine.
+.TP
+.I <port-https>
+.BR MCP_PORT_HTTPS ,
+default
+.BR 8766 .
+.TP
+.I <server-name>
+Any name, by which the agent knows the server.
+.TP
+.I <token>
+The token of the agent, as printed by
+.B mcp-python-token add
+\- see AUTHENTICATION.
+.PP
+The endpoint:
+.BR https://<host>:<port-https>/mcp .
+.SH HTTPS - SERVER SIDE
+In
+.IR /etc/mcp-python/mcp-python.conf :
+.PP
+.RS
+.EX
+MCP_HOST=0.0.0.0
+MCP_HTTP_VARIANT=HTTPS
+MCP_PORT_HTTPS=8766
+MCP_TLS_CERT=/etc/ssl/certs/mcp-python.crt
+MCP_TLS_KEY=/etc/ssl/private/mcp-python.key
+.EE
+.RE
+.PP
+.B MCP_HTTP_VARIANT=both
+keeps the HTTP listener too. The key may stay readable by root only - the
+server reads it before the privileges drop. Then:
+.B "systemctl restart mcp-python"
+\- a reissued certificate also needs a restart.
+.PP
+How the certificate is issued is out of scope of the package. For a test,
+a self-signed one - list in
+.B subjectAltName
+every name and address, by which agents are to reach the server, e.g.
+.BR DNS:<host>,DNS:<other-name>,IP:<address> :
+.PP
+.RS
+.EX
+openssl req \-x509 \-newkey rsa:3072 \-sha256 \-days 825 \-nodes \e
+    \-subj "/CN=<host>" \e
+    \-addext "subjectAltName=DNS:<host>" \e
+    \-keyout /etc/ssl/private/mcp-python.key \e
+    \-out /etc/ssl/certs/mcp-python.crt
+chmod 0600 /etc/ssl/private/mcp-python.key
+.EE
+.RE
+.PP
+Copy
+.I /etc/ssl/certs/mcp-python.crt
+(never the key) to the agent machine - it is
+.IR <cert-file> .
+.SH HTTPS - AGENT OS TRUST
+Debian / Ubuntu, at the agent machine:
+.IP 1. 4
+Put
+.I <cert-file>
+into the OS local CA directory. The file must be PEM and its name must end
+with
+.B .crt
+\- other files are ignored:
+.RS
+.PP
+.EX
+sudo install \-m 0644 <cert-file> /usr/local/share/ca-certificates/
+.EE
+.RE
+.IP 2. 4
+Rebuild the OS bundle
+.I /etc/ssl/certs/ca-certificates.crt
+\- expect
+.BR "1 added" :
+.RS
+.PP
+.EX
+sudo update-ca-certificates
+.EE
+.RE
+.IP 3. 4
+Check - an HTTP status, no TLS error, no
+.BR \-k .
+A
+.B 405
+on
+.B HEAD
+is normal - the endpoint takes GET, POST and DELETE. A
+.B 401
+\- the trust is fine, the token is not:
+.RS
+.PP
+.EX
+curl \-I \-H "Authorization: Bearer <token>" \e
+    https://<host>:<port-https>/mcp
+.EE
+.RE
+.PP
+To remove the trust - delete the file from
+.I /usr/local/share/ca-certificates/
+and run
+.BR "sudo update-ca-certificates \-\-fresh" .
+.SH HTTPS - AGENT RUNTIME TRUST
+The OS store is enough for
+.BR curl (1)
+and for the clients, which use it. But there are corner cases with OS
+keystore ignore and own CA list list distribution - point
+them to the OS bundle in their environment:
+.TP
+.B Python (httpx - mcp, mcp-proxy)
+.BR SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt .
+.TP
+.B Python (requests)
+.BR REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt .
+.TP
+.B Node.js (mcp-remote, MCP Inspector, Electron applications)
+.BR NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt ,
+or with Node.js 22.15+ / 23.8+
+.BR NODE_OPTIONS=\-\-use\-system\-ca .
+Packaged Electron applications may ignore
+.BR NODE_OPTIONS ,
+while
+.B NODE_EXTRA_CA_CERTS
+works there.
+
+Also consider usage of
+.BR NODE_USE_SYSTEM_CA=1 .
+It works with, at least, certain other applications.
+
+.PP
+A variable is read once, at the process start. An application started
+from a menu or a launcher does not see a variable of a shell - set it
+there, or in the client configuration
+.RB ( env
+of a server entry). Quit the application completely (including its tray
+icon) before a new start - otherwise the start only activates the old
+process.
+.SH HTTPS - CLAUDE CLIENTS
+How hard it is to connect depends on the client - after the trust above,
+Claude Code needs one command, Claude Desktop two steps, the Desktop custom
+connector does not work at all.
+.TP
+.B Claude Code with TUI
+It have a package, in a different Apt repository. It talks Streamable HTTP
+itself and trusts the OS
+store (checked with version 2.1.309) - no variable:
+.RS
+.PP
+.EX
+claude mcp add \-\-scope user \-\-transport http <server-name> \e
+    https://<host>:<port-https>/mcp \e
+    \-\-header "Authorization: Bearer <token>"
+claude mcp list
+.EE
+.PP
+Inside a session
+.B /mcp
+shows the server status and tools. Should a version fail with a TLS
+error, start it with
+.BR NODE_EXTRA_CA_CERTS ,
+as above.
+.RE
+.TP
+.B Project configuration (.mcp.json)
+The same, without the command line. The file is usually shared - the
+token comes from a variable of the environment Claude Code is started in:
+.RS
+.PP
+.EX
+{
+    "mcpServers": {
+        "<server-name>": {
+            "type": "http",
+            "url": "https://<host>:<port-https>/mcp",
+            "headers": {
+                "Authorization": "Bearer ${MCP_PYTHON_TOKEN}"
+            }
+        }
+    }
+}
+.EE
+.RE
+.TP
+.B Claude Desktop
+Install a bridge, add a configuration entry. Its
+local configuration accepts only a command, so it needs a local bridge, started by Desktop and talking to it over standard
+input and output. With the Python
+.B mcp-proxy
+(PyPI, in a virtual environment of its own), in
+.IR ~/.config/Claude/claude_desktop_config.json :
+.RS
+.PP
+.EX
+"mcpServers": {
+    "<server-name>": {
+        "command": "<venv>/bin/mcp-proxy",
+        "args": [
+            "\-\-transport", "streamablehttp",
+            "\-\-headers", "Authorization", "Bearer <token>",
+            "https://<host>:<port-https>/mcp"
+        ],
+        "env": {
+            "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt"
+        }
+    }
+}
+.EE
+.PP
+Or with the Node.js
+.B mcp-remote
+(Node.js 22.15+ / 23.8+, fetched by
+.B npx
+at each start; pin a version -
+.B mcp-remote@<version>
+\- for a repeatable behaviour):
+.PP
+.EX
+"mcpServers": {
+    "<server-name>": {
+        "command": "npx",
+        "args": [
+            "\-y", "mcp-remote",
+            "https://<host>:<port-https>/mcp",
+            "\-\-header", "Authorization: Bearer <token>"
+        ],
+        "env": {
+            "NODE_OPTIONS": "\-\-use\-system\-ca"
+        }
+    }
+}
+.EE
+.PP
+With an older Node.js - replace the
+.B env
+entry with
+.BR "\(dqNODE_EXTRA_CA_CERTS\(dq: \(dq/etc/ssl/certs/ca-certificates.crt\(dq" .
+.PP
+.B command
+must be an absolute path, or be on the
+.B PATH
+of Desktop.
+.B mcp-proxy
+defaults to SSE, hence
+.BR "\-\-transport streamablehttp" .
+Quit Desktop completely and start it again - the configuration is read
+at start only.
+.RE
+.TP
+.B Claude Desktop custom connector
+Not usable for a private network. Such connectors (Settings, Connectors)
+are reached from Anthropic's cloud, which can not resolve or reach a
+private host name.
+.TP
+.B Python script (mcp 2.x)
+Run with
+.BR SSL_CERT_FILE :
+.RS
+.PP
+.EX
+import asyncio
+from mcp import Client
+from mcp.client.streamable_http import (
+    create_mcp_http_client, streamable_http_client)
+
+async def main():
+    http = create_mcp_http_client(
+        headers={"Authorization": "Bearer <token>"})
+    url = "https://<host>:<port-https>/mcp"
+    async with Client(streamable_http_client(url, http_client=http)) as c:
+        r = await c.call_tool("run_python", {"code": "print(6 * 7)"})
+        print(r.content[0].text)
+
+asyncio.run(main())
+.EE
+.RE
+.PP
+Over plain HTTP no trust is needed, the token is - and it is readable on
+the wire, see SECURITY: Claude Code takes the same command with an
+.B http://
+URL;
+.B mcp-remote
+refuses a non-localhost URL without
+.BR \-\-allow\-http .
+.PP
+The
+.B claude
+command line client is not packaged by the authors and is not a
+dependency of this package - as the authors' choice, it is to be
+downloaded separately, from Anthropic. (Claude Desktop keeps its own
+copies under
+.IR ~/.config/Claude/claude-code/<version>/ ,
+not on the
+.BR PATH .)
+.SH HTTPS - DIAGNOSTICS
+.TP
+.B 401 Unauthorized
+No
+.B Authorization
+header, or its token is not known to the server - check the header at the
+agent and
+.B mcp-python-token list
+at the server. A client just added is accepted within 5 seconds. With no
+clients at all, or with a token file skipped, there is a line in
+.BR "journalctl \-u mcp-python" .
+.TP
+.B SELF_SIGNED_CERT_IN_CHAIN, DEPTH_ZERO_SELF_SIGNED_CERT, unable to verify the first certificate
+Node.js does not trust the certificate - set
+.BR NODE_EXTRA_CA_CERTS .
+Often shown by a client just as
+.BR "Server unavailable" .
+.TP
+.B CERTIFICATE_VERIFY_FAILED: self-signed certificate
+Python does not trust the certificate - set
+.BR SSL_CERT_FILE .
+.TP
+.B Hostname mismatch, certificate is not valid for
+The host part of the URL is not in the Subject Alternative Name of the
+certificate - connect by a listed name or address, or reissue the
+certificate with it; list them with
+.BR "openssl x509 \-in <cert-file> \-noout \-ext subjectAltName" .
+.TP
+.B curl fails too
+The OS trust is missing - see
+.BR "HTTPS - AGENT OS TRUST" ;
+or the server is not reached - check
+.BR MCP_HOST ,
+.B MCP_HTTP_VARIANT
+and the port, and
+.BR "journalctl \-u mcp-python" .
+.TP
+.B 404 Session not found
+The server restarted while a client held a session - reconnect the
+client. The same answer gets a session used with the token of another
+client - a session belongs to the client, which opened it.
+.SH SEE ALSO
+.BR mcp-python-token (8),
+.BR systemctl (1),
+.BR journalctl (1),
+.BR systemd.exec (5),
+.BR python3 (1),
+.BR update-ca-certificates (8),
+.BR shred (1),
+.BR openssl-req (1ssl),
+.BR curl (1)

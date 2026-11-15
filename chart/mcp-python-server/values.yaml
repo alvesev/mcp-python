@@ -1,0 +1,226 @@
+---
+
+#
+#  Copyright 2026 Alex Vesev
+#
+#  This file is part of MCP Python - Model Context Protocol server to
+#  provide Python.
+#
+#  MCP Python is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  MCP Python is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+#
+##
+
+# Default values for mcp-python-server - the MCP server "mcp-python".
+#
+# Authentication - a bearer token per client, see 'auth'. A client with a
+# valid token executes a code as the server account.
+
+# Streamable HTTP keeps the MCP sessions in the memory of a pod. With more
+# than 1 replica, a client must stay at its pod - see 'service.sessionAffinity'.
+replicaCount: 1
+
+# The image of 'make container'. Push it to a registry the cluster pulls
+# from, or load it into the node (kind, minikube) first.
+image:
+  repository: mcp-python
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Settings of the server - environment, see 'src/mcp-python.conf'. The
+# listen address, the account, the scratch and the TLS paths are set by the
+# chart.
+config:
+  # Seconds, upper limit for a single 'run_python' call.
+  execTimeout: 60
+  # Characters of 'stdout' and 'stderr' (each) returned to a client.
+  outputLimit: 65536
+  # Interpreter for a submitted code - the one of the image by default.
+  workPython: /usr/local/bin/python3
+
+# Listeners - HTTP is always on, unless 'tls.only'.
+ports:
+  http: 8765
+  https: 8766
+
+# HTTPS listener. The certificate and key - an existing Secret of type
+# 'kubernetes.io/tls':
+#
+#   kubectl create secret tls mcp-python-tls --cert=tls.crt --key=tls.key
+#
+# With TLS, the server starts as root, reads the key (mode 0400, owned by
+# root), then drops to the account of the image ('MCP_USER') itself - a
+# submitted code can not read the key. The container keeps SETUID and
+# SETGID for that only (as 'container/docker-compose.yml').
+tls:
+  enabled: false
+  secretName: ""
+  # Only HTTPS ('MCP_HTTP_VARIANT=HTTPS'), not both.
+  only: false
+
+# Authentication - bearer tokens ('Authorization: Bearer ...'). The clients -
+# an existing Secret, a key per client: the key is the name of the client,
+# the value is its token file - the SHA-256 of the token, not the token (see
+# 'src/mcp_auth.py'). From a directory of 'mcp-python-token add NAME':
+#
+#   kubectl create secret generic mcp-python-tokens --from-file=<tokens-dir>
+#
+# 'mcp-python-chart' (the package 'mcp-python-chart') makes both Secrets of
+# the secrets of the user.
+#
+# A client added or revoked - apply the Secret again, add
+# '--dry-run=client --output=yaml | kubectl apply --filename=-'. The files of
+# the pods follow in about a minute and the server reads them again - no
+# restart. The Secret is mounted as files, never as environment - a
+# submitted code sees the environment.
+#
+# No 'secretName' - no clients, every request is refused: the state of the
+# image alone, and of the Deb package after the installation.
+#
+# 'enabled: false' - no authentication: any client, which reaches a
+# listener, executes a code. Keep the service within a trusted network then -
+# see 'networkPolicy'.
+auth:
+  enabled: true
+  secretName: ""
+
+# Extra environment of the server container.
+extraEnv: []
+# - name: MCP_EXEC_TIMEOUT
+#   value: "120"
+
+serviceAccount:
+  create: true
+  # Not mounted - a submitted code runs in the container and would read the
+  # token otherwise.
+  automount: false
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+# Account of the image ('adduser --system' in 'container/Dockerfile'). Numeric,
+# for 'runAsNonRoot'. Replaced by root (then dropped by the server) with TLS.
+podSecurityContext:
+  runAsUser: 100
+  runAsGroup: 101
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# The hardening of 'mcp-python-container' and of the Systemd unit.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# The pod's 'pause' process is PID 1 then and reaps the orphans of a killed
+# submitted code - as 'docker run --init'.
+shareProcessNamespace: true
+
+# The only writable place - per call temporary directories.
+scratch:
+  # "" - the node disk, "Memory" - tmpfs (counts to the memory limit).
+  medium: ""
+  sizeLimit: 1Gi
+
+service:
+  type: ClusterIP
+  # Ports of the service - the container ports by default.
+  port: 8765
+  portHttps: 8766
+  # "ClientIP" - a client stays at its pod, needed for more than 1 replica.
+  sessionAffinity: None
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    # nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  hosts:
+    - host: mcp-python.local
+      paths:
+        - path: /mcp
+          pathType: Prefix
+  tls: []
+  #  - secretName: mcp-python-ingress-tls
+  #    hosts:
+  #      - mcp-python.local
+
+# Limits of 'mcp-python-container' and of the Systemd unit - memory 1G.
+# A limit of processes (as '--pids-limit 64', 'TasksMax=64') is a node setting
+# of the kubelet ('podPidsLimit') - not available here.
+resources:
+  limits:
+    cpu: 750m
+    memory: 1Gi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# TCP - a plain GET of '/mcp' is not a valid MCP request. A 'tcpSocket'
+# without 'port' - the chart sets the one of the first listener.
+livenessProbe:
+  tcpSocket: {}
+  initialDelaySeconds: 5
+  periodSeconds: 20
+readinessProbe:
+  tcpSocket: {}
+  periodSeconds: 10
+
+# With more than 1 replica, see 'service.sessionAffinity'.
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+# Who reaches the server - a must with 'auth.enabled: false'. Needs a
+# network plugin with NetworkPolicy support.
+networkPolicy:
+  enabled: false
+  # Sources allowed to reach the listeners - NetworkPolicyPeer list. Empty -
+  # the pods of the release namespace only.
+  ingressFrom: []
+  # - namespaceSelector:
+  #     matchLabels:
+  #       kubernetes.io/metadata.name: ingress-nginx
+  # Outgoing traffic of the pod - of a submitted code too. Empty - none (DNS
+  # included). Unset the whole 'egress' ('egress: null') to allow any.
+  egress: []
+  # - to:
+  #     - namespaceSelector: {}
+  #   ports:
+  #     - protocol: UDP
+  #       port: 53
+
+# Additional volumes on the output Deployment definition.
+volumes: []
+# Additional volumeMounts on the output Deployment definition.
+volumeMounts: []
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

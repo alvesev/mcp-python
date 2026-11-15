@@ -1,0 +1,50 @@
+{{- /*
+#
+#  Copyright 2026 Alex Vesev
+#
+#  This file is part of MCP Python - Model Context Protocol server to
+#  provide Python.
+#
+#  MCP Python is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  MCP Python is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+#
+##
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mcp-python-server.fullname" . }}
+  labels:
+    {{- include "mcp-python-server.labels" . | nindent 4 }}
+data:
+  # Listens at all addresses of the pod - see 'networkPolicy'.
+  MCP_HOST: "0.0.0.0"
+  MCP_HTTP_VARIANT: {{ include "mcp-python-server.httpVariant" . | quote }}
+  MCP_PORT: {{ .Values.ports.http | quote }}
+  MCP_PORT_HTTPS: {{ .Values.ports.https | quote }}
+  {{- if .Values.tls.enabled }}
+  MCP_TLS_CERT: /run/mcp-python/tls.crt
+  MCP_TLS_KEY: /run/mcp-python/tls.key
+  {{- end }}
+  # The account of the image - the one to drop to, when started as root.
+  MCP_USER: mcp-python
+  MCP_WORK_PYTHON: {{ .Values.config.workPython | quote }}
+  MCP_SCRATCH: /var/lib/mcp-python/scratch
+  MCP_EXEC_TIMEOUT: {{ .Values.config.execTimeout | quote }}
+  MCP_OUTPUT_LIMIT: {{ .Values.config.outputLimit | quote }}
+  MCP_AUTH: {{ ternary "token" "none" .Values.auth.enabled | quote }}
+  {{- if .Values.auth.enabled }}
+  # The Secret 'auth.secretName', mounted - a file per client. Without it -
+  # the empty directory of the image.
+  MCP_AUTH_TOKENS: /etc/mcp-python/tokens
+  {{- end }}

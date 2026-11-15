@@ -1,0 +1,12 @@
+/artifacts/
+/misc/
+/trash/
+*.tar.gz
+*.geany
+*.code-workspace
+.vscode/
+
+/build/
+store-paths
+
+__pycache__

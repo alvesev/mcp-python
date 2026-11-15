@@ -1,0 +1,4 @@
+# The self-extracting archive - a shell script, then the gzip-compressed
+# image after the line '__PAYLOAD_BELOW__'. 'sh -n' of lintian reads the
+# whole file; the script itself is checked by 'make container-package'.
+mcp-python-container: shell-script-fails-syntax-check [usr/lib/mcp-python-container/*_container.run]

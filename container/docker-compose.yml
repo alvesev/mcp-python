@@ -1,0 +1,86 @@
+---
+
+#
+#  Copyright 2026 Alex Vesev
+#
+#  This file is part of MCP Python - Model Context Protocol server to
+#  provide Python.
+#
+#  MCP Python is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  MCP Python is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+#
+##
+
+#
+# Launch of the "mcp-python" container - by 'mcp-python-compose', which gives
+# the variables below: the secrets of the user, the image tag, the address
+# and the CPUs limit. See mcp-python-compose(1).
+#
+#     PACKAGE_NAME, MCP_IMAGE_TAG      # The image.
+#     MCP_TLS_DIR                      # 'tls.crt' and 'tls.key'.
+#     MCP_TOKENS_DIR                   # The token files.
+#     MCP_AUTH_RELOAD_PERIOD           # 'once' - read by root only, before
+#                                      # the privileges drop.
+#     MCP_PUBLISH_HOST, MCP_CPUS
+#
+##
+
+services:
+    mcp-python:
+        image: "${PACKAGE_NAME:?run it by mcp-python-compose}:${MCP_IMAGE_TAG:?run it by mcp-python-compose}"
+        environment:
+            MCP_HTTP_VARIANT: HTTPS
+            MCP_TLS_CERT: /run/mcp-python/tls.crt
+            MCP_TLS_KEY: /run/mcp-python/tls.key
+            MCP_AUTH_RELOAD_PERIOD: "${MCP_AUTH_RELOAD_PERIOD:-once}"
+        volumes:
+        # Made by 'mcp-python-compose' - missing at the host, Docker would
+        # create directories instead.
+        -   ${MCP_TLS_DIR:?run it by mcp-python-compose}:/run/mcp-python:ro
+        # The clients - the token files (the SHA-256 only).
+        # A client added there or removed - a restart ('once').
+        -   ${MCP_TOKENS_DIR:?run it by mcp-python-compose}:/etc/mcp-python/tokens:ro
+        ports:
+            -   "${MCP_PUBLISH_HOST:-127.0.0.1}:8766:8766"
+
+        # Started as root - the server reads the key, then drops to MCP_USER
+        # itself, and the capabilities are gone with that. A submitted code can
+        # not read the key. DAC_READ_SEARCH - the key and the token files (mode
+        # 0600) belong to the user, not to root of the container; read at start
+        # ('once').
+        user: root
+        cap_drop:
+        -   ALL
+        cap_add:
+        -   SETUID
+        -   SETGID
+        -   DAC_READ_SEARCH
+
+        # The rest - as 'mcp-python-container', the hardening of the Systemd
+        # unit ('debian/mcp-python.service').
+        init: true
+        read_only: true
+        tmpfs:
+        -   /var/lib/mcp-python/scratch:mode=1777
+        security_opt:
+        -   no-new-privileges:true
+        mem_limit: 1g
+        pids_limit: 64
+        # Number of CPUs, not a share - Compose has no "percent of the host".
+        # 'mcp-python-compose' sets MCP_CPUS to 75% of the CPUs of the host;
+        # the default here is 75% of one CPU.
+        cpus: "${MCP_CPUS:-0.75}"
+
+        # Back after a failure and after a restart of Docker or the host - not
+        # after 'docker compose stop' or 'down'.
+        restart: unless-stopped

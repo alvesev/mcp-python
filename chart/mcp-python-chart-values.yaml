@@ -1,0 +1,45 @@
+---
+
+#
+#  Copyright 2026 Alex Vesev
+#
+#  This file is part of MCP Python - Model Context Protocol server to
+#  provide Python.
+#
+#  MCP Python is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  MCP Python is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+#
+##
+
+##
+# Values of the chart for 'mcp-python-chart' - the K3s cluster of the user.
+# The image tag, the hosts of the Ingress and its TLS (the names of the TLS
+# certificate of the user) are given by the launcher.
+#
+##
+
+# Loaded into the node by the launcher, never pulled.
+image:
+  pullPolicy: Never
+
+# The Secret of the token files of the user - made by the launcher.
+auth:
+  enabled: true
+  secretName: mcp-python-tokens
+
+# Traefik of K3s - HTTPS with the certificate of the user (the Secret
+# 'mcp-python-tls', made by the launcher), plain HTTP to the pod within the
+# cluster.
+ingress:
+  enabled: true
+  className: traefik

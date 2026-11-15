@@ -1,0 +1,68 @@
+{{- /*
+#
+#  Copyright 2026 Alex Vesev
+#
+#  This file is part of MCP Python - Model Context Protocol server to
+#  provide Python.
+#
+#  MCP Python is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  MCP Python is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+#
+##
+*/ -}}
+{{- $variant := include "mcp-python-server.httpVariant" . }}
+{{- $scheme := ternary "https" "http" (eq $variant "HTTPS") }}
+{{- $port := ternary .Values.service.portHttps .Values.service.port (eq $variant "HTTPS") }}
+MCP server "mcp-python" {{ .Chart.AppVersion }} - listeners: {{ $variant }}. Endpoint path: /mcp
+
+{{ if and .Values.auth.enabled .Values.auth.secretName -}}
+Authentication - bearer tokens, the clients are the keys of the Secret
+'{{ .Values.auth.secretName }}'. A client sends 'Authorization: Bearer <token>'. A client
+added or revoked - apply the Secret again, no restart.
+{{- else if .Values.auth.enabled -}}
+WARNING: authentication - bearer tokens, but no clients: every request is
+refused. Set 'auth.secretName' - a Secret of the token files, a key per client.
+{{- else -}}
+No authentication - any client, which reaches the server, runs a Python code
+in it.{{ if not .Values.networkPolicy.enabled }} Consider 'networkPolicy.enabled=true'.{{ end }}
+{{- end }}
+
+1. The MCP endpoint:
+{{- if .Values.ingress.enabled }}
+{{- range $host := .Values.ingress.hosts }}
+  {{- range .paths }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}{{ .path }}
+  {{- end }}
+{{- end }}
+{{- else if contains "NodePort" .Values.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "mcp-python-server.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo {{ $scheme }}://$NODE_IP:$NODE_PORT/mcp
+{{- else if contains "LoadBalancer" .Values.service.type }}
+     NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+           You can watch its status by running 'kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "mcp-python-server.fullname" . }}'
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "mcp-python-server.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo {{ $scheme }}://$SERVICE_IP:{{ $port }}/mcp
+{{- else if contains "ClusterIP" .Values.service.type }}
+  In the cluster:
+    {{ $scheme }}://{{ include "mcp-python-server.fullname" . }}.{{ .Release.Namespace }}.svc:{{ $port }}/mcp
+
+  From this host:
+    kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "mcp-python-server.fullname" . }} {{ $port }}:{{ $port }}
+    curl -I {{ if .Values.auth.enabled }}-H "Authorization: Bearer <token>" {{ end }}{{ if eq $scheme "https" }}--cacert tls.crt {{ end }}{{ $scheme }}://127.0.0.1:{{ $port }}/mcp
+{{- end }}
+{{- if and (gt (int .Values.replicaCount) 1) (eq .Values.service.sessionAffinity "None") }}
+
+WARNING: {{ .Values.replicaCount }} replicas, but 'service.sessionAffinity' is None - the MCP sessions
+are kept per pod, a client may land at another pod and lose its session.
+{{- end }}

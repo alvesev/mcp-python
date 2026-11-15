@@ -1,0 +1,1 @@
+mcp==2.3.0  # 2.x - 'FastMCP' became 'MCPServer' ('mcp.server.mcpserver').

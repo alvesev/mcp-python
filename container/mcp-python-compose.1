@@ -1,0 +1,135 @@
+.\"
+.\"  Copyright 2026 Alex Vesev
+.\"
+.\"  This file is part of MCP Python - Model Context Protocol server to
+.\"  provide Python.
+.\"
+.\"  MCP Python is free software: you can redistribute it and/or modify
+.\"  it under the terms of the GNU General Public License as published by
+.\"  the Free Software Foundation, either version 3 of the License, or
+.\"  (at your option) any later version.
+.\"
+.\"  MCP Python is distributed in the hope that it will be useful,
+.\"  but WITHOUT ANY WARRANTY; without even the implied warranty of
+.\"  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+.\"  GNU General Public License for more details.
+.\"
+.\"  You should have received a copy of the GNU General Public License
+.\"  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+.\"
+.\"##
+.\"
+.\" Manual page of "mcp-python-compose" - the launcher of the MCP server
+.\" "mcp-python" by Docker Compose, for the current user. The secrets, the
+.\" environment and the security - in "mcp-python-container.1", the same
+.\" for both launchers.
+.\"
+.\" View the source: man ./container/mcp-python-compose.1
+.TH MCP-PYTHON-COMPOSE 1 2026-11-15 "mcp-python-container" "User Commands"
+.SH NAME
+mcp-python-compose \- the MCP server mcp-python of the current user, by Docker Compose
+.SH SYNOPSIS
+.B mcp-python-compose up
+.RI [ "docker compose up options" ]
+.br
+.B mcp-python-compose
+.I command
+.RI [ arguments ]
+.br
+.B mcp-python-compose
+.RB { \-h | \-\-help }
+.SH DESCRIPTION
+.B mcp-python-compose
+starts the
+.BR mcp-python (8)
+server - an MCP server, which runs a Python 3 code for its clients - in a
+container of the local Docker, as a service of the user who runs it, with
+Docker Compose: in the background, back after a restart of Docker or of
+the host. A Compose project per user. The same server in the foreground -
+.BR mcp-python-container (1).
+.PP
+HTTPS at port
+.BR 8766 ,
+published at
+.B 127.0.0.1
+of the host
+.RB ( MCP_PUBLISH_HOST ).
+.PP
+The arguments are a command of
+.B docker compose
+for the project of the user, with its arguments. Nothing is started
+without a command.
+.TP
+.B up
+Starts the server, in the background -
+.BR "docker compose up \-\-detach" .
+Before it - the secrets and the image, as
+.BR mcp-python-container (1)
+describes.
+.TP
+.BR start ", " restart ", " create ", " run
+As
+.BR "docker compose" ,
+the secrets and the image first too.
+.TP
+.BR down ", " stop ", " logs ", " ps ", ..."
+As
+.BR "docker compose" .
+.SH FILES
+.TP
+.I /usr/share/mcp-python-container/docker-compose.yml
+The container - the image, the listener, the mounts of the secrets, the
+limits.
+.PP
+The secrets of the user - see
+.BR mcp-python-container (1),
+FILES.
+.SH ENVIRONMENT
+The same as of
+.BR mcp-python-container (1),
+besides
+.BR "docker compose" 's own.
+.SH SECURITY
+The same as of
+.BR mcp-python-container (1).
+.SH EXAMPLES
+The server, in the background, and its log:
+.PP
+.RS
+.EX
+mcp-python-compose up
+mcp-python-compose logs \-\-follow
+.EE
+.RE
+.PP
+One more client - its token in
+.IR ~/.local/share/mcp-python/clients/laptop.token :
+.PP
+.RS
+.EX
+MCP_CLIENT=laptop mcp-python-compose restart
+.EE
+.RE
+.PP
+A client removed:
+.PP
+.RS
+.EX
+rm ~/.local/share/mcp-python/tokens/laptop \e
+   ~/.local/share/mcp-python/clients/laptop.token
+mcp-python-compose restart
+.EE
+.RE
+.PP
+Stop and remove:
+.PP
+.RS
+.EX
+mcp-python-compose down
+.EE
+.RE
+.SH SEE ALSO
+.BR mcp-python-container (1),
+.BR mcp-python (8),
+.BR docker-compose (1),
+.BR curl (1)

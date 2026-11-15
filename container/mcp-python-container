@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+#
+#  Copyright 2026 Alex Vesev
+#
+#  This file is part of MCP Python - Model Context Protocol server to
+#  provide Python.
+#
+#  MCP Python is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  MCP Python is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+#
+##
+
+##
+# The MCP server 'mcp-python' of the current user, in a Docker container -
+# in the foreground, until Ctrl C. HTTP at port 8765 and HTTPS at port 8766
+# of 127.0.0.1 ('MCP_PUBLISH_HOST'). The secrets and the environment - see
+# 'mcp-python-container-launcher.bash'.
+#
+# The arguments - more options of 'docker run', e.g.:
+#
+#     mcp-python-container --env MCP_EXEC_TIMEOUT=120
+#
+# The secrets only, no container - their paths, as the server settings:
+#
+#     mcp-python-container secrets
+#
+# The hardening - as the one of the Systemd unit: read only file system,
+# the scratch is the only writable place, memory, processes and CPUs
+# limits. Started as root with three capabilities - the server reads the
+# key and the tokens, then drops to its account and the capabilities are
+# gone.
+#
+# See mcp-python-container(1).
+#
+##
+
+set -euo pipefail
+
+for lib in \
+    "$( dirname "$( readlink -f "$0" )" )/mcp-python-container-launcher.bash" \
+    /usr/share/mcp-python-container/mcp-python-container-launcher.bash
+do
+    if [[ -e "${lib}" ]] ; then
+        # shellcheck source=mcp-python-container-launcher.bash
+        source "${lib}"
+        break
+    fi
+done
+declare -F mcpl_secrets >/dev/null || { echo "$( basename "$0" ): No 'mcp-python-container-launcher.bash'." >&2 ; exit 1 ; }
+
+case "${1:-}" in
+    -h|--help)
+        sed -n '/^# The MCP server/,/^##$/p' "$0" | sed -e 's/^# \{0,1\}//' -e '/^#$/d'
+        exit 0
+        ;;
+    secrets)
+        # The secrets only - made, if absent, their modes set; no container.
+        mcpl_secrets
+        echo "MCP_TLS_CERT=${MCPL_DIR_TLS}/tls.crt"
+        echo "MCP_TLS_KEY=${MCPL_DIR_TLS}/tls.key"
+        echo "MCP_AUTH_TOKENS=${MCPL_DIR_TOKENS}"
+        echo "MCP_CLIENT_TOKEN=${MCPL_DIR_CLIENTS}/${MCPL_CLIENT}.token"
+        exit 0
+        ;;
+esac
+
+mcpl_secrets
+mcpl_image
+mcpl_hints http:8765 https:8766
+
+exec "${CONTAINER_TOOL}" run \
+    --rm \
+    --init \
+    --name "${MCPL_INSTANCE}" \
+    --user 0:0 \
+    --cap-drop ALL \
+    --cap-add SETUID \
+    --cap-add SETGID \
+    --cap-add DAC_READ_SEARCH \
+    --security-opt no-new-privileges \
+    --read-only \
+    --tmpfs /var/lib/mcp-python/scratch:mode=1777 \
+    --volume "${MCPL_DIR_TLS}:/run/mcp-python:ro" \
+    --volume "${MCPL_DIR_TOKENS}:/etc/mcp-python/tokens:ro" \
+    --env MCP_HTTP_VARIANT=both \
+    --env MCP_TLS_CERT=/run/mcp-python/tls.crt \
+    --env MCP_TLS_KEY=/run/mcp-python/tls.key \
+    --env MCP_AUTH_RELOAD_PERIOD=once \
+    --memory 1g \
+    --pids-limit 64 \
+    --cpus "${MCPL_CPUS}" \
+    --publish "${MCPL_PUBLISH_HOST}:8765:8765" \
+    --publish "${MCPL_PUBLISH_HOST}:8766:8766" \
+    "$@" \
+    "${MCPL_IMAGE}"

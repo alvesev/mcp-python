@@ -1,0 +1,165 @@
+{{- /*
+#
+#  Copyright 2026 Alex Vesev
+#
+#  This file is part of MCP Python - Model Context Protocol server to
+#  provide Python.
+#
+#  MCP Python is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  MCP Python is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+#
+##
+*/ -}}
+{{- if and .Values.tls.enabled (not .Values.tls.secretName) }}
+{{- fail "tls.enabled needs tls.secretName - a Secret of type 'kubernetes.io/tls'." }}
+{{- end }}
+{{- $variant := include "mcp-python-server.httpVariant" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mcp-python-server.fullname" . }}
+  labels:
+    {{- include "mcp-python-server.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "mcp-python-server.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # A change of the settings restarts the pods.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "mcp-python-server.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "mcp-python-server.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
+      # No service environment variables - a submitted code sees the environment.
+      enableServiceLinks: false
+      shareProcessNamespace: {{ .Values.shareProcessNamespace }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- include "mcp-python-server.securityContext" . | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "mcp-python-server.fullname" . }}
+          {{- with .Values.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            {{- if ne $variant "HTTPS" }}
+            - name: http
+              containerPort: {{ .Values.ports.http }}
+              protocol: TCP
+            {{- end }}
+            {{- if ne $variant "HTTP" }}
+            - name: https
+              containerPort: {{ .Values.ports.https }}
+              protocol: TCP
+            {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- include "mcp-python-server.probe" (dict "probe" . "root" $) | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- include "mcp-python-server.probe" (dict "probe" . "root" $) | nindent 12 }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: scratch
+              mountPath: /var/lib/mcp-python/scratch
+            {{- if .Values.tls.enabled }}
+            - name: tls
+              mountPath: /run/mcp-python
+              readOnly: true
+            {{- end }}
+            {{- if and .Values.auth.enabled .Values.auth.secretName }}
+            # The whole volume, no 'subPath' - such a mount does not follow a
+            # change of the Secret. Without the Secret - the empty directory
+            # of the image: no clients, every request is refused.
+            - name: auth-tokens
+              mountPath: /etc/mcp-python/tokens
+              readOnly: true
+            {{- end }}
+            {{- with .Values.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: scratch
+          emptyDir:
+            {{- with .Values.scratch.medium }}
+            medium: {{ . }}
+            {{- end }}
+            {{- with .Values.scratch.sizeLimit }}
+            sizeLimit: {{ . }}
+            {{- end }}
+        {{- if .Values.tls.enabled }}
+        # Owned by root, mode 0400 - not readable after the privileges drop.
+        - name: tls
+          secret:
+            secretName: {{ .Values.tls.secretName }}
+            defaultMode: 0400
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+        {{- end }}
+        {{- if and .Values.auth.enabled .Values.auth.secretName }}
+        # Readable by all - the server reads it after the privileges drop, and
+        # again at a change. The SHA-256 of the tokens only.
+        - name: auth-tokens
+          secret:
+            secretName: {{ .Values.auth.secretName }}
+            defaultMode: 0444
+        {{- end }}
+        {{- with .Values.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

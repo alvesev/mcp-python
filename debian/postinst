@@ -1,0 +1,133 @@
+#!/bin/bash
+#
+#  Copyright 2026 Alex Vesev
+#
+#  This file is part of MCP Python - Model Context Protocol server to
+#  provide Python.
+#
+#  MCP Python is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  MCP Python is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+#
+##
+
+set -e
+set -o pipefail  # A failure before 'tee' is the one of the pipeline.
+
+##
+# The server virtual environment - created with the 'python3' of the host,
+# the package set of the build reference ('requirements.lock') as
+# constraints. A dependency, which only the host interpreter needs, is
+# resolved freely. Built aside, then swapped - a running server keeps its
+# environment until the restart.
+#
+# The log of the last run - 'venv-create.log', of the one before it -
+# 'venv-create.log.1'. The output goes both to the terminal and to the
+# log ('tee'); Python unbuffered - shown as it goes, not at the end.
+#
+venv_create() {
+    venv="/var/lib/mcp-python/venv"
+    share="/usr/share/mcp-python"
+    log="/var/log/mcp-python/venv-create.log"
+
+    install \
+        --directory \
+        --owner=root \
+        --group=adm \
+        --mode=0750 \
+        /var/log/mcp-python
+    if [ -e "$log" ] ; then
+        mv "$log" "$log.1"
+    fi
+    install \
+        --owner=root \
+        --group=adm \
+        --mode=0640 \
+        /dev/null \
+        "$log"
+    {
+        echo "# Constructing Python virtual environment for use with MCP."
+        echo "# $(date --iso-8601=seconds) - postinst '$1', configured version before - '${2:-none}'."
+        echo "# $(python3 --version) - $(command -v python3)."
+    } | tee --append "$log"
+
+    rm -rf "$venv.new" "$venv.old"
+    python3 -m venv "$venv.new" 2>&1 | tee --append "$log"
+    PYTHONUNBUFFERED=1 "$venv.new/bin/python" -m pip install \
+        --no-cache-dir \
+        --disable-pip-version-check \
+        --no-input \
+        --progress-bar off \
+        --requirement "$share/requirements.txt" \
+        --constraint "$share/requirements.lock" \
+        2>&1 | tee --append "$log"
+    "$venv.new/bin/python" -m pip freeze --disable-pip-version-check \
+        | sed 's/^/# Installed: /' >> "$log"
+    # The scripts of the environment name its location - point them to the final one.
+    { grep -rlF "$venv.new" "$venv.new/bin" || true ; } \
+        | xargs --no-run-if-empty sed -i "s#$venv.new#$venv#g"
+    sed -i "s#$venv.new#$venv#g" "$venv.new/pyvenv.cfg"
+
+    if [ -e "$venv" ] ; then
+        mv "$venv" "$venv.old"
+    fi
+    mv "$venv.new" "$venv"
+    rm -rf "$venv.old"
+    echo "# $(date --iso-8601=seconds) - done, '$venv'." | tee --append "$log"
+}
+
+case "$1" in
+    configure)
+        install \
+            --directory \
+            --owner=root \
+            --group=root \
+            --mode=0755 \
+            /var/lib/mcp-python
+        if ! getent passwd mcp-python > /dev/null ; then
+            adduser \
+                --system \
+                --group \
+                --home /var/lib/mcp-python \
+                --no-create-home \
+                --shell /usr/sbin/nologin \
+                --gecos "MCP server - Python 3" \
+                mcp-python
+        fi
+        install \
+            --directory \
+            --owner=mcp-python \
+            --group=mcp-python \
+            --mode=0700 \
+            /var/lib/mcp-python/scratch
+        # The token files ('mcp-python-token') - of the package, but the
+        # group is known only here. Read by the server after the privileges
+        # drop - as the group, not by other accounts.
+        install \
+            --directory \
+            --owner=root \
+            --group=mcp-python \
+            --mode=0750 \
+            /etc/mcp-python/tokens
+
+        # Not 'if ! venv_create' - there 'set -e' is off within the function.
+        trap 'rm -rf /var/lib/mcp-python/venv.new \
+            ; echo "mcp-python: the server virtual environment is not created - is the Python package index reachable (pip, '"'"'/etc/pip.conf'"'"')? See '"'"'/var/log/mcp-python/venv-create.log'"'"'." >&2' \
+            EXIT
+        venv_create "$@"
+        trap - EXIT
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

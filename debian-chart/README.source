@@ -1,0 +1,32 @@
+mcp-python-chart - notes on the packaging
+=========================================
+
+The staged build
+----------------
+
+As the one of 'mcp-python-container' - see 'debian-container/README.source'.
+The stage - 'build/deb-chart/mcp-python-chart-<version>', made by 'make
+package-deb' of 'chart/Makefile' ('make chart-package-deb' at the root):
+
+ * 'debian' - a copy of this directory, the symbolic links replaced by the
+   files.
+
+ * 'chart' - a copy of the directory 'chart' of the source tree.
+
+ * '<chart name>-<version>.tgz' - the chart, of 'make package' there.
+
+The changelog is kept by hand; its version is the one of 'debian/changelog'
+- the build stops otherwise ('deb-version-check' of 'chart/Makefile').
+
+The launcher
+------------
+
+'mcp-python-chart' takes the secrets code of 'mcp-python-container'
+('mcp-python-container-launcher.bash') and its image - so the dependency on
+that package, of the same version: the chart deploys the image of the same
+build. The chart name in the launcher is filled in at the staging
+('@CHART_NAME@'); in the source tree it stays, and the launcher takes the
+chart directory next to it.
+
+The chart and its values are in '/usr/share/mcp-python-chart' - the chart
+is architecture independent ('Architecture: all').

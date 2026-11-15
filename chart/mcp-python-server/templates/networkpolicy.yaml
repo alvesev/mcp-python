@@ -1,0 +1,63 @@
+{{- /*
+#
+#  Copyright 2026 Alex Vesev
+#
+#  This file is part of MCP Python - Model Context Protocol server to
+#  provide Python.
+#
+#  MCP Python is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  MCP Python is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+#
+##
+*/ -}}
+{{- if .Values.networkPolicy.enabled }}
+{{- $variant := include "mcp-python-server.httpVariant" . }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "mcp-python-server.fullname" . }}
+  labels:
+    {{- include "mcp-python-server.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "mcp-python-server.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    {{- if kindIs "slice" .Values.networkPolicy.egress }}
+    - Egress
+    {{- end }}
+  ingress:
+    - from:
+        {{- with .Values.networkPolicy.ingressFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- else }}
+        - podSelector: {}
+        {{- end }}
+      ports:
+        {{- if ne $variant "HTTPS" }}
+        - protocol: TCP
+          port: http
+        {{- end }}
+        {{- if ne $variant "HTTP" }}
+        - protocol: TCP
+          port: https
+        {{- end }}
+  {{- if kindIs "slice" .Values.networkPolicy.egress }}
+  egress:
+    {{- with .Values.networkPolicy.egress }}
+    {{- toYaml . | nindent 4 }}
+    {{- else }} []
+    {{- end }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,49 @@
+mcp-python - notes on the packaging
+===================================
+
+The Systemd unit
+----------------
+
+'make install' (the upstream 'Makefile') does not install the Systemd unit -
+the same file tree goes into the container image ('make container'), where
+there is no Systemd. The unit is 'debian/mcp-python.service' and gets into
+the package by a debhelper convention, with no line about it in
+'debian/rules':
+
+ * 'debian/rules' includes the CDBS 'debhelper.mk', which calls
+   'dh_systemd_enable' and 'dh_systemd_start' for the package.
+
+ * 'dh_systemd_enable' looks for 'debian/<package>.service' - here
+   'debian/mcp-python.service' - and installs it into the package as
+   '/usr/lib/systemd/system/mcp-python.service'.
+
+ * Both helpers generate maintainer script snippets for the unit - enable
+   and start at the installation, restart at an upgrade, stop at the
+   removal, 'daemon-reload'. The snippets replace the '#DEBHELPER#' line of
+   'debian/postinst' and 'debian/postrm'; 'prerm' is generated as a whole.
+   See 'debian/mcp-python.*.debhelper' after a build.
+
+So the unit has to keep the name of the package. Another name needs
+'--name' for the helpers ('DEB_DH_SYSTEMD_ENABLE_ARGS',
+'DEB_DH_SYSTEMD_START_ARGS' in 'debian/rules').
+
+The token files
+---------------
+
+'/etc/mcp-python/tokens' - the clients of the server, a file per client
+(see mcp-python(8), AUTHENTICATION). The empty directory is of the package
+('make install'); the files are made by 'mcp-python-token' and are not
+known to dpkg - the maintainer scripts care about them:
+
+ * 'debian/postinst' gives the directory to 'root:mcp-python', mode 0750 -
+   the group exists only after the account is created there. The server
+   reads the files after the privileges drop, as the group.
+
+ * At 'remove' the files stay, as the configuration does - a reinstalled
+   package finds the clients again. 'upgrade' does not touch them.
+
+ * At 'purge' 'debian/postrm' overwrites the files with 'shred', then
+   deletes them and the directory. 'shred' is of 'coreutils', which is in
+   'Recommends' only: without it, or at a failure of it, there is a message
+   and the files are deleted without overwriting - a purge does not fail.
+   The files hold the SHA-256 of the tokens, not the tokens.

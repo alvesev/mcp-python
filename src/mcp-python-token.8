@@ -1,0 +1,241 @@
+.\"
+.\"  Copyright 2026 Alex Vesev
+.\"
+.\"  This file is part of MCP Python - Model Context Protocol server to
+.\"  provide Python.
+.\"
+.\"  MCP Python is free software: you can redistribute it and/or modify
+.\"  it under the terms of the GNU General Public License as published by
+.\"  the Free Software Foundation, either version 3 of the License, or
+.\"  (at your option) any later version.
+.\"
+.\"  MCP Python is distributed in the hope that it will be useful,
+.\"  but WITHOUT ANY WARRANTY; without even the implied warranty of
+.\"  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+.\"  GNU General Public License for more details.
+.\"
+.\"  You should have received a copy of the GNU General Public License
+.\"  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+.\"
+.\"##
+.\"
+.\" Manual page of "mcp-python-token" - the clients of the MCP server
+.\" "mcp-python", their bearer tokens.
+.\"
+.\" View the source: man ./src/mcp-python-token.8
+.TH MCP-PYTHON-TOKEN 8 2026-11-14 "mcp-python 0.0.0" "System Administration"
+.SH NAME
+mcp-python-token \- clients of the MCP server mcp-python, their tokens
+.SH SYNOPSIS
+.B mcp-python-token
+.RB [ \-\-dir
+.IR DIR ]
+.B add
+.I NAME
+.br
+.B mcp-python-token
+.RB [ \-\-dir
+.IR DIR ]
+.B list
+.br
+.B mcp-python-token
+.RB [ \-\-dir
+.IR DIR ]
+.B remove
+.I NAME
+.br
+.B mcp-python-token
+.RB { \-h | \-\-help }
+.SH DESCRIPTION
+.B mcp-python-token
+adds, lists and removes the clients of the
+.BR mcp-python (8)
+server. A client is a file in the directory of the token files - the file
+name is the client name, the content is the SHA-256 of the token of the
+client. The tool works with the files only and does not talk to the server:
+a running server reads the directory again by itself, at most once per 5
+seconds - no restart.
+.PP
+How the server uses the tokens - the header of a request, the answers, the
+sessions, what a token gives - is in
+.BR mcp-python (8),
+AUTHENTICATION and SECURITY.
+.SH COMMANDS
+.TP
+.BI add " NAME"
+Creates the client and prints its token - random, 256 bits, with the prefix
+.BR mcpp_ .
+The token is alone at the standard output, the message about it is at the
+standard error. It is shown this once and is not kept - it can not be shown
+again, only replaced: remove the client and add it again. Fails, if the
+client exists.
+.TP
+.B list
+Prints the names of the clients, one per line. The files, which the server
+skips (see FILES), are not listed.
+.TP
+.BI remove " NAME"
+Revokes the client - its file is overwritten with zeros, then deleted.
+Within 5 seconds the server refuses the token; a session of the client is
+refused too, the sessions of the other clients stay.
+.PP
+.I NAME
+\- letters, digits,
+.BR . ,
+.B _
+and
+.BR \- ,
+the first one is a letter or a digit. It is a valid key of a Kubernetes
+Secret.
+.SH OPTIONS
+.TP
+.BI \-\-dir " DIR"
+The directory of the token files. Default -
+.B MCP_AUTH_TOKENS
+of the environment, then
+.IR /etc/mcp-python/tokens .
+It has to exist - the tool does not create it.
+.TP
+.BR \-h ", " \-\-help
+Prints the usage.
+.SH ENVIRONMENT
+.TP
+.B MCP_AUTH_TOKENS
+The directory of the token files, when there is no
+.BR \-\-dir .
+The same variable the server reads - but the configuration file of the
+service,
+.IR /etc/mcp-python/mcp-python.conf ,
+is not read by the tool: with another directory set there, name it with
+.BR \-\-dir .
+.SH FILES
+.TP
+.I /etc/mcp-python/tokens
+The default directory. Of the package it is of root, readable by the group
+.B mcp-python
+\- so
+.B add
+and
+.B remove
+need root there, and
+.B list
+too.
+.TP
+.I /etc/mcp-python/tokens/<NAME>
+The client
+.IR NAME ,
+mode 0644, whatever the umask is - the server reads it after the privileges
+drop:
+.RS
+.PP
+.EX
+# mcp-python - client 'laptop', 2026-11-14. The SHA-256 of the token.
+sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+.EE
+.PP
+Read is the first line, which is not empty and not a comment
+.RB ( # ).
+The file does not let anyone in - a token can not be derived from it; so it
+is safe to read, to copy and to mount. A file made by another means is
+accepted too, if it has such a line - but a token chosen by a human is
+guessable, and then the hash is not a protection.
+.PP
+The server and
+.B list
+skip the entries with a leading dot (a file being written by
+.BR add ,
+.I ..data
+of a Kubernetes Secret volume), the directories, the files with a name not
+valid for a client and the files without a
+.B sha256:
+line. The server reports a skipped file in its log.
+.RE
+.TP
+.I /usr/lib/mcp-python/mcp_auth.py
+The tool itself -
+.I /usr/sbin/mcp-python-token
+runs it with
+.BR python3 .
+Standard library only - no virtual environment is needed.
+.SH EXIT STATUS
+.TP
+.B 0
+Done.
+.TP
+.B 1
+A failure, with a message at the standard error - the client exists
+.RB ( add ),
+no such client
+.RB ( remove ),
+a wrong name, the directory is missing or there are no rights to it.
+.TP
+.B 2
+A wrong command line.
+.SH NOTES
+.B remove
+overwrites a file in place, as
+.BR shred (1)
+does. Whether the old content is really gone is up to the file system and
+the disk - it is not guaranteed with a copy-on-write file system or an SSD.
+The file holds a hash, not a token - it is a second line of defence.
+.PP
+A token is a password: who has it, executes a code at the server. Keep it
+where the client keeps its secrets; do not pass it to the server side
+through the environment - see
+.BR mcp-python (8),
+SECURITY.
+.PP
+Where the package is not installed - a container host, a build machine -
+the tool runs from the source tree:
+.BR "python3 src/mcp_auth.py" ,
+with the same arguments.
+.SH EXAMPLES
+Add a client, keep its token in a file only the caller reads, see the
+clients, revoke it:
+.PP
+.RS
+.EX
+(umask 077 ; sudo mcp-python-token add laptop > laptop.token)
+sudo mcp-python-token list
+sudo mcp-python-token remove laptop
+.EE
+.RE
+.PP
+Replace the token of a client - the old one stops working:
+.PP
+.RS
+.EX
+sudo mcp-python-token remove laptop
+sudo mcp-python-token add laptop
+.EE
+.RE
+.PP
+The clients of a container - a directory at the host
+.RI ( <tokens-dir> ),
+mounted read only at
+.I /etc/mcp-python/tokens
+of the container:
+.PP
+.RS
+.EX
+mkdir <tokens-dir>
+python3 src/mcp_auth.py \-\-dir <tokens-dir> add laptop
+.EE
+.RE
+.PP
+The clients of a Kubernetes deployment - the same directory as a Secret, a
+key per client
+.RB ( auth.secretName
+of the Helm chart). A client added or revoked - apply the Secret again:
+.PP
+.RS
+.EX
+kubectl create secret generic <secret-name> \e
+    \-\-from-file=<tokens-dir> \e
+    \-\-dry-run=client \-\-output=yaml | kubectl apply \-\-filename=\-
+.EE
+.RE
+.SH SEE ALSO
+.BR mcp-python (8),
+.BR shred (1),
+.BR sha256sum (1)

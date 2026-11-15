@@ -1,0 +1,5 @@
+mcp-python-chart (0.5.0) zara; urgency=low
+
+  * The Helm chart of 'mcp-python' and its K3s launcher.
+
+ -- Alex Vesev <alex.vesev@gmail.com>  Sun, 15 Nov 2026 14:00:00 +0100

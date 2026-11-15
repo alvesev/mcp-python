@@ -1,0 +1,220 @@
+.\"
+.\"  Copyright 2026 Alex Vesev
+.\"
+.\"  This file is part of MCP Python - Model Context Protocol server to
+.\"  provide Python.
+.\"
+.\"  MCP Python is free software: you can redistribute it and/or modify
+.\"  it under the terms of the GNU General Public License as published by
+.\"  the Free Software Foundation, either version 3 of the License, or
+.\"  (at your option) any later version.
+.\"
+.\"  MCP Python is distributed in the hope that it will be useful,
+.\"  but WITHOUT ANY WARRANTY; without even the implied warranty of
+.\"  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+.\"  GNU General Public License for more details.
+.\"
+.\"  You should have received a copy of the GNU General Public License
+.\"  along with MCP Python. If not, see <https://www.gnu.org/licenses/>.
+.\"
+.\"##
+.\"
+.\" Manual page of "mcp-python-chart" - the launcher of the MCP server
+.\" "mcp-python" by its Helm chart, in a K3s cluster of the current user.
+.\" The secrets, the common environment and the security of the server -
+.\" in "mcp-python-container.1".
+.\"
+.\" View the source: man ./chart/mcp-python-chart.1
+.TH MCP-PYTHON-CHART 1 2026-11-15 "mcp-python-chart" "User Commands"
+.SH NAME
+mcp-python-chart \- the MCP server mcp-python of the current user, by its Helm chart, in K3s
+.SH SYNOPSIS
+.B mcp-python-chart
+.RB [ \-\-chart
+.IR TGZ | DIR ]
+.B up
+.RI [ "helm upgrade options" ]
+.br
+.B mcp-python-chart
+.BR status " | " logs " | " test " | " down
+.br
+.B mcp-python-chart
+.BR kubectl " | " helm
+.RI [ arguments ]
+.br
+.B mcp-python-chart
+.RB { \-h | \-\-help }
+.SH DESCRIPTION
+.B mcp-python-chart
+deploys the
+.BR mcp-python (8)
+server - an MCP server, which runs a Python 3 code for its clients - by
+its Helm chart, into a K3s cluster of the user who runs it. The cluster is
+a container of the local Docker, made by the launcher, and runs in the
+background, back after a restart of Docker or of the host. No image
+registry and no chart repository are needed. The same server without
+Kubernetes -
+.BR mcp-python-container (1),
+.BR mcp-python-compose (1).
+.PP
+HTTPS by the Ingress (Traefik of K3s) at port
+.B 8443
+.RB ( MCP_INGRESS_PORT ),
+published at
+.B 127.0.0.1
+of the host
+.RB ( MCP_PUBLISH_HOST ),
+for the host names of the TLS certificate.
+.SH COMMANDS
+.TP
+.B up
+Makes the secrets and loads the image, as
+.BR mcp-python-container (1)
+describes; makes the cluster, or starts it again; loads the image into the
+cluster; applies the certificate and the token files as Secrets; installs
+or upgrades the release and waits for it. More arguments go to
+.BR "helm upgrade" ,
+e.g.
+.BR "\-\-set config.execTimeout=120" .
+Run again - the Secrets are applied again: a client added or removed is
+noticed by the server in about a minute, no restart.
+.TP
+.B status
+The state of the cluster, the pods, the service and the Ingress.
+.TP
+.B logs
+The log of the server, until Ctrl C.
+.TP
+.B test
+.B helm test
+of the release - the listener accepts connections.
+.TP
+.B down
+The cluster removed, with all its state. The secrets of the user stay.
+.TP
+.BR kubectl ", " helm
+The tool at the cluster of the user, with the arguments. The same, with
+no launcher - the kubeconfig of the cluster in
+.BR KUBECONFIG :
+.RS
+.PP
+.EX
+export KUBECONFIG=~/.local/share/mcp-python/k3s/kubeconfig.yaml
+kubectl \-\-namespace mcp-python get pods
+helm \-\-namespace mcp-python list
+.EE
+.RE
+.SH OPTIONS
+.TP
+.BR \-\-chart " \fITGZ\fR|\fIDIR\fR"
+The chart - a packed one or a directory. Default - the chart of the
+package
+.RB ( MCP_CHART ).
+.SH FILES
+.TP
+.I /usr/share/mcp-python-chart/mcp-python-server-<version>.tgz
+The chart.
+.TP
+.I /usr/share/mcp-python-chart/mcp-python-chart-values.yaml
+The values of the release - the loaded image, the Secrets, the Ingress.
+.TP
+.I ~/.local/share/mcp-python/k3s/kubeconfig.yaml
+The kubeconfig of the cluster, mode 0600 - the credentials of its
+administrator. Used by the commands
+.B kubectl
+and
+.BR helm .
+.PP
+The secrets of the user - see
+.BR mcp-python-container (1),
+FILES.
+.SH ENVIRONMENT
+.B KUBECONFIG
+is set by the launcher, whatever the environment has - the commands are
+always at the cluster of the user. The rest - the same as of
+.BR mcp-python-container (1),
+besides
+.BR CONTAINER_TOOL :
+the cluster is a container of Docker only. And:
+.TP
+.B MCP_CHART
+The chart, as
+.BR \-\-chart .
+.TP
+.B MCP_INGRESS_PORT
+The host port of the Ingress. Default
+.BR 8443 .
+.TP
+.B MCP_K3S_API_PORT
+The host port of the Kubernetes API, at
+.B 127.0.0.1
+only. Default
+.BR 16443 .
+.TP
+.B MCP_K3S_IMAGE
+The image of K3s.
+.SH SECURITY
+The K3s container is privileged - it has full access to the host while it
+runs.
+.PP
+In the cluster the server runs as its own account. The token files are a
+Secret mounted into the pod, readable by that account - they keep the
+SHA-256 of the tokens, not the tokens. The certificate and its key are
+used by Traefik only; the pod serves plain HTTP within the cluster.
+.SH EXAMPLES
+The server, and a check of it:
+.PP
+.RS
+.EX
+mcp-python-chart up
+mcp-python-chart test
+.EE
+.RE
+.PP
+One more client - its token in
+.IR ~/.local/share/mcp-python/clients/laptop.token :
+.PP
+.RS
+.EX
+MCP_CLIENT=laptop mcp-python-chart up
+.EE
+.RE
+.PP
+Another chart, unpacked:
+.PP
+.RS
+.EX
+mcp-python-chart \-\-chart ./mcp-python-server up
+.EE
+.RE
+.PP
+The server by hand, then back to the shell:
+.PP
+.RS
+.EX
+export KUBECONFIG=~/.local/share/mcp-python/k3s/kubeconfig.yaml
+kubectl \-\-namespace mcp-python rollout restart deployment
+kubectl \-\-namespace mcp-python port\-forward service/mcp\-python\-mcp\-python\-server 8765
+unset KUBECONFIG
+.EE
+.RE
+.PP
+All gone:
+.PP
+.RS
+.EX
+mcp-python-chart down
+.EE
+.RE
+.SH REQUIREMENTS
+.BR docker ,
+.B kubectl
+and
+.B helm
+at the host.
+.SH SEE ALSO
+.BR mcp-python-container (1),
+.BR mcp-python-compose (1),
+.BR mcp-python (8),
+.BR helm (1),
+.BR kubectl (1)

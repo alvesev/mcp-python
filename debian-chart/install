@@ -1,0 +1,3 @@
+*.tgz usr/share/mcp-python-chart/
+chart/mcp-python-chart usr/bin/
+chart/mcp-python-chart-values.yaml usr/share/mcp-python-chart/
