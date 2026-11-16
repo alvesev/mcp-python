@@ -1,0 +1,133 @@
+' © 2026 Alex Vesev
+' Licensed under CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
+' Converted from mcp-python-startup.dia
+' A zero-width space (U+200B) follows a ';' at a line end, or precedes a
+' leading quote, inside a multi-line activity - else PlantUML ends the
+' activity, or reads a comment, there.
+
+@startuml mcp-python-startup
+start
+:ServeSettings.from_env()
+MCP_HOST, MCP_PORT, MCP_PORT_HTTPS,
+MCP_HTTP_VARIANT, MCP_TLS_*, MCP_USER;
+if () then (invalid)
+  #pink:sys.exit(message)
+  unknown MCP_HTTP_VARIANT,
+  a port is not an integer;
+  end
+endif
+note right
+  Pink - the start fails, status 1, in one of two ways:
+  sys.exit(message) - the message only;​
+  an exception - not caught (KeyboardInterrupt only
+  is), so a traceback.
+end note
+:ServeSettings.validate()
+called by from_env(), then once more by the entry point
+HTTPS or both: TLS cert and key
+set, exist, readable (real UID);
+if () then (error)
+  #pink:exception, a traceback
+  ValueError - cert or key is not set,
+  FileNotFoundError, PermissionError;
+  end
+endif
+:AuthSettings.from_env()
+MCP_AUTH, MCP_AUTH_TOKENS,
+MCP_AUTH_RELOAD_PERIOD;
+if () then (invalid)
+  #pink:sys.exit(message)
+  unknown MCP_AUTH, wrong
+  MCP_AUTH_RELOAD_PERIOD;
+  end
+endif
+:AuthSettings.validate(plain_http_host)
+token: MCP_AUTH_TOKENS is a directory;​
+warnings - 'none', no tokens, plain
+HTTP not at a loopback address;
+if () then (error)
+  #pink:exception, a traceback
+  FileNotFoundError - no MCP_AUTH_TOKENS
+  directory, OSError - it is not readable;
+  end
+endif
+:ToolSettings.from_env()
+MCP_WORK_PYTHON, MCP_SCRATCH,
+MCP_EXEC_TIMEOUT, MCP_OUTPUT_LIMIT;
+if () then (invalid)
+  #pink:sys.exit(message)
+  a timeout or a limit is not an integer;
+  end
+endif
+:build_server(tools, **auth.server_kwargs())
+MCPServer "python3" + run_python, python_info;​
+token: + TokenVerifier(TokenStore(tokens_dir));​
+​'once': TokenStore.load() - the files read here;
+note right
+  The token files are not read at the start, besides
+  a look for "no tokens" (a warning). The server reads
+  them at the requests - as MCP_USER, again once per
+  5 s: a client added or revoked - no restart.
+  MCP_AUTH_RELOAD_PERIOD=once - read at the start,
+  before the privileges drop, never again: they may be
+  root only; a client added or revoked - a restart.
+end note
+if () then (error)
+  #pink:exception, a traceback
+  ​'once': OSError - the directory is not readable
+  (a file, which is not readable - skipped, a warning);
+  end
+endif
+:_configs(mcp, serve)
+streamable_http_app(); uvicorn.Config per listener,
+lifespan "on" at the first one only;
+:Config.load() for each listener
+TLS cert and key into an SSLContext;
+note right
+  Order matters: the TLS key is read as root
+  (Config.load), then the privileges are dropped -
+  a submitted code can not read the key file.
+end note
+if () then (error)
+  #pink:exception, a traceback
+  a wrong cert or key (ssl.SSLError, OSError);
+  end
+endif
+if () then ([uid == 0])
+  :_drop_privileges(MCP_USER)
+  setgroups([]), setgid, setuid;​
+  HOME, USER, LOGNAME of MCP_USER;
+  if () then (error)
+    #pink:sys.exit(message) - root without
+    MCP_USER, drop failed;​
+    exception, a traceback - KeyError:
+    no such account MCP_USER;
+    end
+  endif
+else ([not root])
+endif
+:os.chdir(MCP_SCRATCH);
+if () then (error)
+  #pink:exception, a traceback
+  OSError - no such directory, no access;
+  end
+endif
+:asyncio.run(_serve(configs))
+uvicorn.Server per Config, serve() as tasks;
+:Serving
+until a listener stops (signal, failure);
+note right
+  SIGTERM (systemctl stop, kill): uvicorn finishes the
+  requests in progress, runs the shutdown, then the
+  process ends by the signal - a clean stop for Systemd.
+end note
+if () then (Ctrl C)
+  :KeyboardInterrupt (SIGINT)
+  sys.exit(130), no traceback;
+  end
+endif
+:should_exit on all servers; gather tasks;
+stop
+
+footer © 2026 Alex Vesev\nLicensed under CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
+@enduml

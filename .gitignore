@@ -10,3 +10,4 @@
 store-paths
 
 __pycache__
+/.metadata/

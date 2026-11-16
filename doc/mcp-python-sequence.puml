@@ -1,0 +1,73 @@
+' © 2026 Alex Vesev
+' Licensed under CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
+' Converted from mcp-python-sequence.dia
+
+@startuml mcp-python-sequence
+actor "MCP client" as client
+participant "uvicorn.Server" as server
+participant "Starlette app" as app <<ASGI>>
+participant "TokenVerifier" as verifier <<mcp_auth>>
+participant "MCPServer" as mcp
+participant "run_python" as tool <<tool>>
+participant "mcp_tools._exec" as exec
+participant "TemporaryDirectory" as tmp
+participant "workload" as work <<subprocess>>
+
+client -> server : POST /mcp + Bearer token  tools/call run_python {code, timeout_s}
+activate server
+server -> app : ASGI request
+activate app
+app -> verifier : verify_token(token)
+activate verifier
+verifier -> verifier : TokenStore.lookup(token)
+note right of verifier
+  No "Authorization: Bearer" header, or no client of the
+  token - "401 Unauthorized", "WWW-Authenticate: Bearer";
+  the request ends at the Starlette app.
+  TokenStore: sha256(token) -> the client name, from the
+  files of MCP_AUTH_TOKENS, read again once per 5 s
+  (MCP_AUTH_RELOAD_PERIOD), or once, at the start.
+  A session belongs to the client, which opened it -
+  a token of another client: 404.
+  MCP_AUTH=none - no verify_token().
+end note
+verifier --> app : AccessToken(client_id)
+deactivate verifier
+app -> mcp : call tool "run_python"
+activate mcp
+mcp -> tool : run_python(code, timeout_s)
+activate tool
+tool -> tool : timeout = clamp(timeout_s, 1, exec_timeout)
+tool -> exec : _exec([work_python, "-I", "-c", code], timeout, settings)
+activate exec
+create tmp
+exec -> tmp : create in MCP_SCRATCH
+create work
+exec -> work : create_subprocess_exec(cwd=tmp, stdin=DEVNULL)
+exec -> work : communicate()  [wait_for timeout]
+activate work
+work --> exec : stdout, stderr, returncode
+deactivate work
+destroy work
+note right of work
+  Timeout: proc.kill(), then communicate() again;
+  timed_out = true. Every call is a fresh process -
+  no state between calls. python_info: the same
+  _exec path twice (sys.version, pip list).
+end note
+exec -> tmp : remove (with block exit)
+destroy tmp
+exec -> exec : _cut(stdout, stderr, output_limit)
+exec --> tool : {returncode, stdout, stderr, timed_out}
+deactivate exec
+tool --> mcp : dict
+deactivate tool
+mcp --> app : CallToolResult
+deactivate mcp
+app --> server : ASGI response
+deactivate app
+server --> client : HTTP response (JSON or SSE)
+deactivate server
+
+footer © 2026 Alex Vesev\nLicensed under CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
+@enduml

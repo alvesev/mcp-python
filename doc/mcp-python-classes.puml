@@ -1,0 +1,182 @@
+' © 2026 Alex Vesev
+' Licensed under CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
+' Converted from mcp-python-classes.dia
+
+@startuml mcp-python-classes
+hide empty members
+set separator none
+
+package "mcp-python.py" <<module>> {
+  class "mcp-python" as mcp_python <<module, entry point>> {
+    + <<entry>> __main__()  # configure, load TLS, drop privileges, serve
+    - _configs(mcp: MCPServer, serve: ServeSettings): list[uvicorn.Config]
+    - _drop_privileges(user: str | None)
+    - <<async>> _serve(configs: list[uvicorn.Config])
+  }
+  class ServeSettings <<dataclass(frozen)>> {
+    + host: str = "127.0.0.1"
+    + port: int = 8765
+    + port_https: int = 8766
+    + http_variant: str = "HTTP" | "HTTPS" | "both"
+    + tls_cert: str | None
+    + tls_key: str | None
+    + user: str | None
+    + from_env(env = environ): ServeSettings
+    + validate()
+  }
+}
+
+package "mcp_tools.py" <<module>> {
+  class mcp_tools <<module>> {
+    + env_int(env: Mapping, name: str, default: str): int
+    + build_server(settings: ToolSettings, **server_kwargs): MCPServer
+    - <<async>> _exec(args: list[str], timeout: int, settings: ToolSettings): ExecResult
+    - _cut(b: bytes, limit: int): str
+  }
+  class ToolSettings <<dataclass(frozen)>> {
+    + work_python: str = "python3"
+    + scratch: str = "/tmp"
+    + exec_timeout: int = 60
+    + output_limit: int = 65536
+    + from_env(env = environ): ToolSettings
+  }
+  class "python3 tools" as tools <<MCP tools (closures of build_server)>> {
+    + <<async, mcp.tool>> run_python(code: str, timeout_s: int = 30): ExecResult
+    + <<async, mcp.tool>> python_info(): PythonInfo
+  }
+  class ExecResult <<dict>> {
+    + returncode: int
+    + stdout: str
+    + stderr: str
+    + timed_out: bool
+  }
+  class PythonInfo <<dict>> {
+    + version: str
+    + packages: list[str]
+  }
+}
+
+package "uvicorn" <<library>> {
+  class Config {
+    + app: ASGI app
+    + host: str
+    + port: int
+    + ssl_certfile: str | None
+    + ssl_keyfile: str | None
+    + log_level: str
+    + lifespan: str = "on" | "off"
+    + load()  # builds the SSLContext - reads cert and key
+  }
+  class Server {
+    + config: Config
+    + should_exit: bool
+    + <<async>> serve()
+  }
+}
+
+package "mcp.server.mcpserver" <<library (MCP SDK)>> {
+  class MCPServer {
+    + settings: Settings
+    + MCPServer(name: str, instructions: str)
+    + tool(): decorator
+    + streamable_http_app(host: str): Starlette
+  }
+  class Starlette <<ASGI app>> {
+    + route = "/mcp" (streamable HTTP)
+    + lifespan = session manager
+  }
+}
+
+package "asyncio, tempfile" <<Python stdlib>> {
+  class TemporaryDirectory {
+    + dir: str = settings.scratch
+    + __enter__(): str
+    + __exit__()  # removes the directory
+  }
+  class Process <<asyncio.subprocess>> {
+    + returncode: int | None
+    + <<async>> communicate(): (bytes, bytes)
+    + kill()
+  }
+}
+
+package "mcp_auth.py" <<module>> {
+  class TokenVerifier <<MCP SDK token verifier>> {
+    + store: TokenStore
+    + <<async>> verify_token(token: str): AccessToken | None
+  }
+  class AuthSettings <<dataclass(frozen)>> {
+    + mode: str = "token" | "none"
+    + tokens_dir: str = "/etc/mcp-python/tokens"
+    + reload_period: float = 5.0 | inf (once)
+    + from_env(env = environ): AuthSettings
+    + validate(plain_http_host = None)
+    + server_kwargs(): dict
+  }
+  class TokenStore {
+    + directory: str
+    + reload_interval: float = 5.0
+    + lookup(token: str): str | None
+    + names(): list[str]
+    + load()
+    + add(name: str): str
+    + remove(name: str)
+  }
+  class mcp_auth <<module, tool "mcp-python-token">> {
+    + main(argv = None)
+    - _digest(token: str): str
+    - _is_loopback(host: str): bool
+    - _reload_period(value: str): float
+  }
+}
+
+mcp_python ..> ServeSettings : <<create>>\nfrom_env()
+mcp_python ..> Config : <<create>>\n_configs()
+mcp_python ..> Server : <<create>>\n_serve()
+Server --> Config : config
+mcp_python ..> mcp_tools : <<import>>\nbuild_server(), env_int()
+mcp_python ..> ToolSettings : <<create>>\nfrom_env()
+ServeSettings ..> mcp_tools : <<use>>\nenv_int()
+Config --> Starlette : app
+MCPServer ..> Starlette : <<create>>\nstreamable_http_app()
+mcp_tools ..> MCPServer : <<create>>\nbuild_server()
+MCPServer *--> tools : registers @mcp.tool()
+tools --> ToolSettings : settings (closure)
+tools ..> mcp_tools : <<call>>\n_exec()
+tools ..> PythonInfo : <<create>>
+mcp_tools ..> ExecResult : <<create>>\n_exec()
+mcp_tools ..> TemporaryDirectory : <<use>>\ncwd per call
+mcp_tools ..> Process : <<create>>\ncreate_subprocess_exec()
+mcp_python ..> AuthSettings : <<create>>\nfrom_env()
+AuthSettings ..> TokenVerifier : <<create>>\nserver_kwargs()
+AuthSettings ..> TokenStore : <<create>>\nvalidate(), server_kwargs()
+MCPServer --> TokenVerifier : token_verifier
+TokenVerifier --> TokenStore : store
+mcp_auth ..> TokenStore : <<call>>\nadd(), names(), remove()
+
+note as N_settings
+  Settings - environment, read once at start
+  (Systemd: /etc/mcp-python/mcp-python.conf):
+    ServeSettings: MCP_HOST, MCP_PORT, MCP_PORT_HTTPS,
+      MCP_HTTP_VARIANT, MCP_TLS_CERT, MCP_TLS_KEY, MCP_USER
+    ToolSettings: MCP_WORK_PYTHON, MCP_SCRATCH,
+      MCP_EXEC_TIMEOUT, MCP_OUTPUT_LIMIT
+    AuthSettings: MCP_AUTH, MCP_AUTH_TOKENS,
+      MCP_AUTH_RELOAD_PERIOD
+  Values shown are the code defaults.
+end note
+N_settings .. ServeSettings
+
+note as N_tokens
+  TokenStore - the directory MCP_AUTH_TOKENS: a file per client,
+  the name - the name of the client, the content - the SHA-256
+  of its token ("sha256:<64 hex>"); read again once per
+  MCP_AUTH_RELOAD_PERIOD (5 s), or "once" - load() in
+  server_kwargs(), as root, before the privileges drop.
+  Standard library only - the SDK is imported in server_kwargs()
+  and verify_token(); MCP_AUTH=none - server_kwargs() gives {}.
+end note
+N_tokens .. TokenStore
+
+footer © 2026 Alex Vesev\nLicensed under CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
+@enduml

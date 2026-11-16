@@ -1,0 +1,53 @@
+' © 2026 Alex Vesev
+' Licensed under CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
+' Converted from mcp-python-deployment.dia
+
+@startuml mcp-python-deployment
+left to right direction
+skinparam componentStyle uml2
+
+actor "MCP client\n(launcher)" as client
+
+node "Host or container" {
+  component "/etc/mcp-python/mcp-python.conf\n(container: --env, image defaults)" <<environment>> as conf
+  component "mcp-python.service" <<systemd unit>> as unit
+
+  node "process: mcp-python.py  (root at start, then MCP_USER;\nplain image: MCP_USER from the start)" as proc {
+    component "uvicorn.Server\nHTTP :MCP_PORT (8765)" <<listener>> as http
+    component "uvicorn.Server\nHTTPS :MCP_PORT_HTTPS (8766)" <<listener>> as https
+    component "Starlette app, /mcp\nbearer auth, streamable HTTP\n+ session manager (lifespan)" <<ASGI>> as app
+    component "MCPServer "python3"\ntools: run_python, python_info" <<MCP>> as mcp
+    component "TokenVerifier, TokenStore\nsha256(token) -> client name\nfiles read once per 5 s, or once\nat start (MCP_AUTH_RELOAD_PERIOD)" <<mcp_auth>> as auth
+  }
+
+  component "workload interpreter\nMCP_WORK_PYTHON -I -c <code>\n(python_info: also -I -m pip list)\nas MCP_USER, stdin /dev/null,\nkilled at timeout" <<subprocess, one per call>> as work
+  component "MCP_SCRATCH/tmpXXXX\nempty, removed after the call" <<directory, one per call>> as scratch
+  component "MCP_TLS_CERT, MCP_TLS_KEY\n(PEM)" <<files, root only>> as tls
+  component "MCP_AUTH_TOKENS/<client>\nSHA-256 of a token, no token\n('once': may be root only;\nKubernetes: a Secret volume)" <<files, a file per client>> as tokens
+  component "mcp-python-token\nadd | list | remove NAME" <<tool>> as tokentool
+}
+
+client ..> http : <<HTTP>>\nPOST /mcp, Bearer token
+client ..> https : <<HTTPS>>\nPOST /mcp, Bearer token
+http ..> app : <<ASGI>>
+https ..> app : <<ASGI>>
+app ..> mcp : tools/call
+app ..> auth : <<call>>\nverify_token()
+mcp ..> work : <<create>>\npipes: stdout, stderr
+work ..> scratch : cwd
+tokentool ..> tokens : <<write>>
+tokens ..> auth : <<read>>
+tls ..> https : <<read>>\nConfig.load() before the privileges drop
+unit ..> proc : <<start>>\nEnvironmentFile
+conf ..> unit : <<read>>
+
+note as N1
+  MCP_AUTH=token: a request without a token of a known client - 401.
+  A token gives a code execution as MCP_USER - keep it as a password;
+  over plain HTTP it is readable on the wire - HTTPS, or a loopback.
+  MCP_AUTH=none: any host, which reaches a listener, runs a code.
+  MCP_HTTP_VARIANT: HTTP, HTTPS or both.
+end note
+
+footer © 2026 Alex Vesev\nLicensed under CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
+@enduml
