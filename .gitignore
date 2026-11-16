@@ -3,6 +3,8 @@
 /trash/
 *.tar.gz
 *.geany
+.metadata/
+.project
 *.code-workspace
 .vscode/
 
