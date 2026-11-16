@@ -1,0 +1,3 @@
+# SVG files from PUML files are to be regenerated regularly by
+# 'plantuml -tsvg *.puml'.
+*.svg

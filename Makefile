@@ -39,6 +39,7 @@ export VCS_TAG := $(PACKAGE_NAME)_$(PACKAGE_VERSION)
 
 export FILE_STORE_PATHS_LIST := store-paths
 export DIR_ORIGIN := src
+export DIR_DOC := doc
 export DIR_LIB := /usr/lib/$(PACKAGE_NAME)
 export DIR_SHARE := /usr/share/$(PACKAGE_NAME)
 export DIR_MAN8 := /usr/share/man/man8
@@ -50,7 +51,7 @@ INSTALL_OWNER ?= --owner=root --group=root
 
 #all: clean-all compile package
 
-.PHONY: clean clean-all generate-rel-info install package package-src package-deb package-deb-src package-deb-container package-deb-chart package-helm release release-ask unrelease build dev-launch container secrets tls-cert tls-install tls-uninstall auth-token
+.PHONY: clean clean-all generate-rel-info install package package-src package-deb package-deb-src package-deb-container package-deb-chart package-helm release release-ask unrelease build documentation dev-launch container secrets tls-cert tls-install tls-uninstall auth-token
 
 clean:
 	@PS4="●:make:$(@): "
@@ -129,7 +130,7 @@ generate-rel-info:
 # environment itself is created at the target OS, by 'postinst', with the
 # interpreter there.
 #
-build: $(DIR_BUILD_VENV)
+build: documentation $(DIR_BUILD_VENV)
 $(DIR_BUILD_VENV):
 	@PS4="●:make:$(@): "
 	set -xeu
@@ -142,6 +143,17 @@ $(DIR_BUILD_VENV):
 	    echo "# Package set of the reference virtual environment, built with $$( "$(DIR_BUILD_VENV)/bin/python" --version )."
 	    "$(DIR_BUILD_VENV)/bin/pip" freeze --disable-pip-version-check
 	} > "$(DIR_BUILD)/requirements.lock"
+
+	true : Job done.
+
+##
+# The diagrams - an SVG file per PlantUML one ('$(DIR_DOC)/*.puml'), next
+# to its source.
+#
+documentation:
+	@PS4="●:make:$(@): "
+	set -xeu
+	plantuml -tsvg "$(DIR_DOC)/"*.puml
 
 	true : Job done.
 
